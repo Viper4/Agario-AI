@@ -1,46 +1,25 @@
 import cv2
 import numpy as np
 import json
-import pyautogui
-import ctypes
-from game import Object
 
 
 class ImageProcessing:
-    def __init__(self, screen_resolution, image_scale: float):
+    def __init__(self):
         self.masks = {}
         with open("masks.json", encoding='utf-8') as file:
             self.masks = json.load(file)
 
-        self.screen_res = screen_resolution
-        self.image_scale = image_scale
-        if screen_resolution == "auto":
-            self.screen_res = self.get_screen_res()
-            print(f"Using screen resolution of {self.screen_res}")
-
-        self.scaled_resolution = [int(self.screen_res[0] * self.image_scale),
-                                  int(self.screen_res[1] * self.image_scale)]
-        self.screen_offset = []
-
         self.img_visualization = None  # Image for visualizing processing results
 
-    def get_screen_res(self):
-        user32 = ctypes.windll.user32
-        return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+    def convert_to_mat(self, png_bytes: bytes):
+        """
+        Converts bytes of a PNG image into a cv2 Mat.
+        :param png_bytes: bytes of a PNG image
+        :return: cv2 Mat
+        """
+        img_array = np.frombuffer(png_bytes, np.uint8)
+        return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
-    def screenshot(self):
-        """
-        Takes a screenshot
-        :return: cv2.Mat
-        """
-        self.screen_offset = [self.screen_res[0] // 2 - self.scaled_resolution[0] // 2,
-                              self.screen_res[1] // 2 - self.scaled_resolution[1] // 2]
-        region = (self.screen_offset[0], self.screen_offset[1], self.scaled_resolution[0], self.scaled_resolution[1])
-        img = pyautogui.screenshot('screencap.png', region=region)
-        img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-        #self.img_visualization = img.copy()
-        return img
-    
     def pre_processing(self, img: cv2.Mat):
         """
         Pre-processes the image for object recognition by
@@ -60,6 +39,7 @@ class ImageProcessing:
         """
         Performs object recognition on the given pre-processed image
         :param img: cv2.Mat
+        :param verbose: bool
         :return: Dictionary of arrays of detected objects
         """
         img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -69,7 +49,6 @@ class ImageProcessing:
 
         # BGR Blacklist
         for mask_setting in self.masks["BGR"]["blacklist"]:
-            print(mask_setting)
             mask = cv2.inRange(img, np.array(mask_setting["lower"]), np.array(mask_setting["upper"]))
             mask_result = cv2.bitwise_or(mask_result, mask)
         mask_result = cv2.bitwise_not(mask_result)  # Invert mask to keep everything except the blacklist
@@ -100,13 +79,12 @@ class ImageProcessing:
             area = cv2.contourArea(cnt)  # Get the area of the object
             if verbose:
                 print(f"Detected contour with area {area}")
-            if area > 800:  # Filter out small objects
+            if area > 500:  # Filter out small objects and artifacts
                 perimeter = cv2.arcLength(cnt, True)  # Calculate object's perimeter
                 circularity = 4 * np.pi * (area / (perimeter ** 2))  # Calculate how circular the object is
                 approx = cv2.approxPolyDP(cnt, 0.02 * perimeter, True)  # Approximate the object's shape
                 x, y, w, h = cv2.boundingRect(approx)  # Get the object's bounding box
-                origin = (x + (w // 2) + self.screen_offset[0],
-                          y + (h // 2) + self.screen_offset[1])  # Absolute screen pos of the center of the object
+                origin = (x + (w // 2), y + (h // 2))  # Position of the center of the object relative to the image
 
                 object_type = mask_setting
                 if circularity > 0.7:
@@ -129,6 +107,6 @@ class ImageProcessing:
         if self.img_visualization is None:
             return
         cv2.namedWindow("Processed Image", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Processed Image", self.scaled_resolution[0], self.scaled_resolution[1])  # set initial size
+        cv2.resizeWindow("Processed Image", 800, 400)
         cv2.imshow("Processed Image", self.img_visualization)
         cv2.waitKey(1)

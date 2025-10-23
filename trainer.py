@@ -19,7 +19,7 @@ def on_press(key):
 
 
 if __name__ == "__main__":
-    agar_agent = AgarAgent()
+    agar_agent = AgarAgent(0.25)
     agent_thread = threading.Thread(target=agar_agent.run)
     agent_thread.start()
 
