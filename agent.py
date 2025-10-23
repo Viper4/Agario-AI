@@ -1,6 +1,3 @@
-import numpy as np
-import cv2
-import pyautogui
 import time
 import threading
 import json
@@ -27,11 +24,24 @@ class AgarAgent(threading.Thread):
 
     def run(self):
         random_id = random.randint(0, 10000)  # ID for this agent, can use as name in game to differentiate it (maybe)
+
+        self.scraper.wait_for_element("id", "nick", 10)  # Wait until name input field is loaded
+        time.sleep(1)  #
+        if not self.scraper.enter_name(random_id):
+            print("Failed to enter name")
+            return
+
+        self.scraper.wait_for_element("id", "play", 10)  # Wait until play button is loaded
+        if not self.scraper.play_game():
+            print("Failed to play game")
+            return
+
         self.game.start_time = time.time()
         while self.program_running:
             if self.agent_running:
-                canvas_png = self.scraper.get_canvas_image()
-                img = self.image_processor.convert_to_mat(canvas_png)
-                objects = self.image_processor.object_recognition(img, False)
-                self.image_processor.show_visual()
+                if self.scraper.in_game():
+                    canvas_png = self.scraper.get_canvas_image()
+                    img = self.image_processor.convert_to_mat(canvas_png)
+                    objects = self.image_processor.object_recognition(img, False)
+                    self.image_processor.show_visual()
             time.sleep(self.run_interval)

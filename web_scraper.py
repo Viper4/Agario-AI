@@ -3,8 +3,9 @@ import os
 from selenium import webdriver
 from selenium.webdriver.edge.service import Service
 from selenium.webdriver.edge.options import Options
-import base64
-import time
+from selenium.common.exceptions import NoSuchElementException, ElementNotInteractableException, TimeoutException
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))  # Get directory of project
@@ -16,8 +17,6 @@ class WebScraper:
 
         # Set up web driver options to avoid bot detection
         options.add_experimental_option("detach", True)  # Keep browser open
-        #options.add_argument("--headless=new")  # Run browser with no UI
-        options.add_argument("--disable-gpu")  # Prevent WebGL redraw glitches
 
         # Arguments to prevent bot detection
         options.add_argument("--no-sandbox")
@@ -53,6 +52,8 @@ class WebScraper:
 
         self.driver.get("https://agar.io/#ffa")
 
+        self.main_ui = self.driver.find_element("id", "mainui-app")
+
     def get_canvas_image(self):
         """
         Takes screenshot of the game canvas and returns it as bytes.
@@ -61,3 +62,73 @@ class WebScraper:
         canvas = self.driver.find_element("tag name", "canvas")
         return canvas.screenshot_as_png
 
+    def enter_name(self, name):
+        """
+        Enters a name into the input field (if it exists) for the name when you start the game.
+        Returns True on success, False otherwise.
+        :param name: string
+        :return: bool
+        """
+        try:
+            name_input = self.driver.find_element("id", "nick")
+            if not name_input.is_displayed():
+                return False
+            name_input.send_keys(name)
+            return True
+        except NoSuchElementException or ElementNotInteractableException:
+            return False
+
+    def in_game(self):
+        """
+        Check whether we are actively playing the game or in the menu/watching ad.
+        :return: bool
+        """
+        # main_ui element is disabled from display when we're playing
+        return not self.main_ui.is_displayed()
+
+    def play_game(self):
+        """
+        Presses the play button if it exists.
+        Returns True on success, False otherwise.
+        :return: bool
+        """
+        try:
+            play_button = self.driver.find_element("id", "play")
+            # Check if the button is hidden
+            if not play_button.is_displayed():
+                return False
+            play_button.click()
+            return True
+        except NoSuchElementException or ElementNotInteractableException:
+            return False
+
+    def press_continue(self):
+        """
+        Presses the continue button if it exists.
+        Returns True on success, False otherwise.
+        :return: bool
+        """
+        try:
+            continue_button = self.driver.find_element("id", "statsContinue")
+            if not continue_button.is_displayed():
+                return False
+            continue_button.click()
+            return True
+        except NoSuchElementException or ElementNotInteractableException:
+            return False
+
+    def wait_for_element(self, by: str, value: str, timeout: float):
+        """
+        Waits for an element to be present and displayed on the page.
+        Returns True on success, False otherwise.
+        :param by: string
+        :param value: string
+        :param timeout: float
+        :return: bool
+        """
+        try:
+            WebDriverWait(self.driver, timeout).until(EC.presence_of_element_located((by, value)))
+            WebDriverWait(self.driver, timeout).until(EC.visibility_of_element_located((by, value)))
+        except TimeoutException:
+            return False
+        return True
