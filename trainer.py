@@ -88,7 +88,7 @@ class GeneticTrainer:
             pool = Pool()
             jobs = []
             for i in range(self.population_size):
-                jobs.append(pool.apply_async(self.population[i].run_game))
+                jobs.append(pool.apply_async(self.population[i].run_game, args=(True,)))
             pool.close()
             pool.join()
 
@@ -141,7 +141,7 @@ if __name__ == "__main__":
         fitness_weights = FitnessWeights(food=0.75, time_alive=0.5, cells_eaten=2.0, highest_mass=1.5)
         agent = BaseAgent(0.25, fitness_weights)
         while input("Run game? (Y/n)> ") == "Y":
-            print(f"Game finished with {agent.run_game()} fitness")
+            print(f"Game finished with {agent.run_game(visualize=False)} fitness")
     else:
         print("Invalid command")
 

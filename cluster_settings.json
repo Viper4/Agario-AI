@@ -1,0 +1,24 @@
+{
+  "virus": {
+    "identify_by": "mask",
+    "max_density": 8,
+    "cluster_distance": 200.0
+  },
+  "unknown": {
+    "identify_by": "perimeter",
+    "variants": {
+      "food": {
+        "min_perimeter": 25.0,
+        "max_perimeter": 150.0,
+        "max_density": 32,
+        "cluster_distance": 150.0
+      },
+      "player": {
+        "min_perimeter": 150.0,
+        "max_perimeter": 1000000.0,
+        "max_density": 8,
+        "cluster_distance": 200.0
+      }
+    }
+  }
+}

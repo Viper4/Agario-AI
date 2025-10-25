@@ -7,6 +7,7 @@ from web_scraper import WebScraper
 import random
 import torch
 import numpy as np
+import game
 
 
 class Hyperparameters:
@@ -40,23 +41,13 @@ class BaseAgent(threading.Thread):
         self.fitness_weights = fitness_weights
         self.fitness = 0.0
 
-    @staticmethod
-    def get_distance(x1, y1, x2, y2):
-        """
-        Calculates linear distance between point 1 and point 2
-        :param x1: 1st x position
-        :param y1: 1st y position
-        :param x2: 2nd x position
-        :param y2: 2nd y position
-        :return: float
-        """
-        return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
-
     def start_game(self):
         """
         Generates random ID for new username and plays the game
         """
         random_id = random.randint(0, 10000)  # ID for this agent, can use as name in game to differentiate it (maybe)
+
+        self.scraper.press_continue(wait=True)
 
         if not self.scraper.enter_name(name=str(random_id), wait=True):
             print("Failed to enter name")
@@ -68,16 +59,16 @@ class BaseAgent(threading.Thread):
 
         print("Game started")
 
-    def get_game_data(self, verbose: bool = False):
+    def get_game_data(self, visualize: bool = False, verbose: bool = False):
         """
         Extracts data from the game
         """
         canvas_png = self.scraper.screenshot_canvas_image()
         img = self.image_processor.convert_to_mat(canvas_png)
-        objects = self.image_processor.object_recognition(img, verbose)
+        objects = self.image_processor.object_recognition(img, visualize, verbose)
         return objects
 
-    def run_game(self):
+    def run_game(self, visualize: bool = False):
         """
         Runs a game for this agent with no logic for testing purposes.
         Basically manual control for the agent's logic to test object recognition and fitness calculation.
@@ -88,10 +79,8 @@ class BaseAgent(threading.Thread):
         while self.program_running:
             if self.scraper.in_game():
                 self.alive = True
-                objects = self.get_game_data()
+                objects = self.get_game_data(visualize=True, verbose=True)
                 print(f"\nObjects: {objects}")
-
-                self.image_processor.show_visual(save_to_file=True)
             else:
                 if self.alive:  # Just died
                     print("Agent died. Calculating fitness...")
@@ -177,7 +166,7 @@ class RNNAgent(BaseAgent):
             noise = torch.randn_like(param) * sigma  # Gaussian noise
             param.data.add_(noise)
 
-    def run_game(self):
+    def run_game(self, visualize: bool):
         """
         Runs a single game for this agent
         :return: fitness
@@ -186,13 +175,12 @@ class RNNAgent(BaseAgent):
         while self.program_running:
             if self.scraper.in_game():
                 self.alive = True
-                objects = self.get_game_data()
-                self.image_processor.show_visual(save_to_file=False)
+                objects = self.get_game_data(visualize=visualize)
 
                 # Convert objects list to useable input for the network
                 x = torch.zeros((1, self.hyperparameters.input_size))
-                # Split up game canvas into 8x16 regions
-                # Each region has 8 nodes (object type, distance, direction, speed, perimeter, area, circularity)
+                # Just define fixed size of 48 closest objects (From testing, maximum number of objects on screen at a time is around 50)
+                # Each object has 6 nodes (label, distance, direction, speed, area, density)
                 environment = np.array((128, 8))
                 for i in range(8):
                     for j in range(16):

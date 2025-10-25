@@ -3,6 +3,7 @@ import numpy as np
 import json
 import pytesseract
 from PIL import Image
+import game
 
 
 class ImageProcessing:
@@ -10,6 +11,10 @@ class ImageProcessing:
         self.masks = {}
         with open("masks.json", encoding='utf-8') as file:
             self.masks = json.load(file)
+
+        self.cluster_settings = {}
+        with open("cluster_settings.json", encoding='utf-8') as file:
+            self.cluster_settings = json.load(file)
 
         self.img_visualization = None  # Image for visualizing processing results
 
@@ -37,12 +42,13 @@ class ImageProcessing:
         img_thres = cv2.erode(img_dial, kernel, iterations=1)
         return img_thres
 
-    def object_recognition(self, img: cv2.Mat, verbose: bool):
+    def object_recognition(self, img: cv2.Mat, visualize: bool, verbose: bool):
         """
         Performs object recognition on the given pre-processed image
         :param img: cv2.Mat
+        :param visualize: whether to visualize the image
         :param verbose: bool
-        :return: List of detected objects
+        :return: List of detected GameObjects
         """
         self.img_visualization = img.copy()
 
@@ -73,54 +79,133 @@ class ImageProcessing:
                     result = np.bitwise_or(result, dilated_mask)
 
                 masked_imgs[mask_type] = cv2.bitwise_and(img_hsv, img_hsv, mask=result)
-                objects.extend(self.parse_contours(self.pre_processing(masked_imgs[mask_type]), mask_type, verbose))
+                objects.extend(self.parse_contours_to_objects(self.pre_processing(masked_imgs[mask_type]), label=mask_type, verbose=verbose))
                 # Remove objects from general image that are in masked_imgs[mask_type] so we dont overwrite them
                 mask_result = cv2.bitwise_and(mask_result, cv2.bitwise_not(result))
 
-                # Visualize mask
-                cv2.namedWindow(f"{mask_type} mask", cv2.WINDOW_NORMAL)
-                cv2.resizeWindow(f"{mask_type} mask", 800, 400)
-                cv2.imshow(f"{mask_type} mask", masked_imgs[mask_type])
-
-        # Visualize default object mask
+                if visualize:
+                    # Visualize mask
+                    cv2.namedWindow(f"{mask_type} mask", cv2.WINDOW_NORMAL)
+                    cv2.resizeWindow(f"{mask_type} mask", 1200, 800)
+                    cv2.imshow(f"{mask_type} mask", masked_imgs[mask_type])
         masked_img = cv2.bitwise_and(img_hsv, img_hsv, mask=mask_result)
-        cv2.namedWindow("Masked Image", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Masked Image", 800, 400)
-        cv2.imshow("Masked Image", masked_img)
+        objects.extend(self.parse_contours_to_objects(self.pre_processing(masked_img), label="unknown", verbose=verbose))
 
-        objects.extend(self.parse_contours(self.pre_processing(masked_img), "object", verbose))
+        if visualize:
+            # Visualize default object mask
+            cv2.namedWindow("Masked Image", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("Masked Image", 1200, 800)
+            cv2.imshow("Masked Image", masked_img)
+
+            # Visualize objects
+            for obj in objects:
+                # Draw rectangle and label over object for visualization
+                x1 = int(obj.bounding_box[0].x)
+                y1 = int(obj.bounding_box[0].y)
+                x2 = int(obj.bounding_box[1].x)
+                y2 = int(obj.bounding_box[1].y)
+                cv2.rectangle(self.img_visualization,
+                              pt1=(x1, y1),
+                              pt2=(x2, y2),
+                              color=(0, 255, 0), thickness=2)
+                cv2.putText(self.img_visualization, text=f"{obj.label} n={obj.density}",
+                            org=(x1, y1 - 10),
+                            fontFace=cv2.FONT_HERSHEY_COMPLEX, fontScale=0.6,
+                            color=(0, 255, 0), thickness=2)
+                cv2.putText(self.img_visualization, text=f"A={obj.area:.2f} P={obj.perimeter:.2f} C={obj.circularity:.2f}",
+                            org=(x1, y2 + 15),
+                            fontFace=cv2.FONT_HERSHEY_COMPLEX, fontScale=0.6,
+                            color=(0, 255, 0), thickness=2)
+            self.show_visual(True)
+
+        if verbose:
+            print(f"Identified {len(objects)} objects")
+
         return objects
 
-    def parse_contours(self, img: cv2.Mat, object_label: str, verbose: bool):
+    def parse_contours_to_objects(self, img: cv2.Mat, label: str, verbose: bool):
         """
         Extracts objects from the image using contour detection
         :param img: cv2.Mat
-        :param object_label: str
+        :param label: label to assign to objects and key to find cluster settings with
         :param verbose: bool
-        :return: List of dictionaries
+        :return: List of GameObjects
         """
+        # Cache settings outside the loop to avoid repeated dict lookups
+        settings = self.cluster_settings.get(label, {})
+        identify_by = settings.get("identify_by")
+        max_density = settings.get("max_density", 1)
+        cluster_distance = settings.get("cluster_distance", 0)
+        variants = settings.get("variants", None)
+
         objects = []
-        contours, hierarchy = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        for cnt in contours:  # Iterate through each detected object
-            area = cv2.contourArea(cnt)  # Get the area of the object
+        contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            area = cv2.contourArea(cnt)  # Get the area of the contour
+            if area < 100:  # Filter out small noise
+                continue
+
+            perimeter = cv2.arcLength(cnt, True)  # Calculate object's perimeter
+            if perimeter == 0:
+                continue  # Avoid divide-by-zero
+
+            circularity = 4 * np.pi * (area / (perimeter ** 2))  # Calculate how circular the object is
+            approx = cv2.approxPolyDP(cnt, 0.02 * perimeter, True)  # Approximate the object's shape
+            x, y, w, h = cv2.boundingRect(approx)  # Get the object's bounding box
+            half_w = w * 0.5
+            half_h = h * 0.5
+            origin = game.Vector(x + half_w, y + half_h)  # Position of the center of the object relative to the image
+
             if verbose:
-                print(f"Detected contour with area {area}")
-            if area > 50:  # Filter out small objects
-                perimeter = cv2.arcLength(cnt, True)  # Calculate object's perimeter
-                circularity = 4 * np.pi * (area / (perimeter ** 2))  # Calculate how circular the object is
-                approx = cv2.approxPolyDP(cnt, 0.02 * perimeter, True)  # Approximate the object's shape
-                x, y, w, h = cv2.boundingRect(approx)  # Get the object's bounding box
-                origin = (x + (w // 2), y + (h // 2))  # Position of the center of the object relative to the image
+                print(f"Detected contour at {origin}: A={area}, P={perimeter}, C={circularity}")
 
-                # Draw rectangle and label over object for visualization
-                cv2.rectangle(self.img_visualization, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(self.img_visualization, text=object_label + " " + str(len(contours)),
-                            org=(x, y - 10),
-                            fontFace=cv2.FONT_HERSHEY_COMPLEX, fontScale=0.8,
-                            color=(0, 255, 0), thickness=2)
+            if variants is not None:
+                if identify_by == "perimeter":
+                    # Check variants for matching perimeter
+                    for key, value in variants.items():
+                        if value["min_perimeter"] < perimeter < value["max_perimeter"]:
+                            label = key
+                            max_density = value.get("max_density", max_density)
+                            cluster_distance = value.get("cluster_distance", cluster_distance)
+                            break
 
-                objects.append({"obj": object_label, "pos": origin, "perimeter": perimeter,
-                                "area": area, "circularity": circularity})
+            obj = game.GameObject(label=label,
+                                  pos=origin,
+                                  perimeter=perimeter,
+                                  area=area,
+                                  circularity=circularity,
+                                  density=1,
+                                  bounding_box=(game.Vector(x, y), game.Vector(x + w, y + h)))
+
+            # Clustering
+            if max_density > 1:
+                # Try merging this object with any nearby cluster
+                for other_obj in objects:
+                    if other_obj.density >= max_density:
+                        continue
+                    if other_obj.label != label:
+                        continue
+
+                    dx = obj.pos.x - other_obj.pos.x
+                    dy = obj.pos.y - other_obj.pos.y
+                    if dx * dx + dy * dy < cluster_distance ** 2:
+                        # Update position as weighted average by area
+                        # (x, y) = (A1x1 + A2x2) / (A1+A2), (A1y1 + A2y2) / (A1+A2)
+                        total_area = other_obj.area + obj.area
+                        other_obj.pos = game.Vector(
+                            int((other_obj.area * other_obj.pos.x + obj.area * obj.pos.x) / total_area),
+                            int((other_obj.area * other_obj.pos.y + obj.area * obj.pos.y) / total_area))
+
+                        other_obj.area = total_area
+                        other_obj.perimeter += obj.perimeter
+                        other_obj.density += 1
+                        other_obj.circularity = (other_obj.circularity + obj.circularity) / 2
+                        other_obj.extend_bounds(obj.bounding_box)
+                        break
+                else:
+                    objects.append(obj)
+            else:
+                objects.append(obj)
         return objects
 
     def show_visual(self, save_to_file: bool):
@@ -132,12 +217,12 @@ class ImageProcessing:
         if self.img_visualization is None:
             return
         cv2.namedWindow("Processed Image", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Processed Image", 800, 400)
+        cv2.resizeWindow("Processed Image", 1200, 800)
         cv2.imshow("Processed Image", self.img_visualization)
         if save_to_file:
             cv2.imwrite("processed_image.png", self.img_visualization)
         cv2.waitKey(1)
-        
+
     def extract_text(self, png_bytes: bytes):
         """
         Run OCR on the image to extract text

@@ -54,7 +54,7 @@ class WebScraper:
         # Run JavaScript in console to remove ads periodically
         hide_ads_script = """
         setInterval(() => {
-            ['iframe', '#adsBottom', '#adbg'].forEach(s => {
+            ['iframe', '#adsBottom', '#adbg', '#openfl-content'].forEach(s => {
                 document.querySelectorAll(s).forEach(e => e.remove());
             });
         }, 500);
