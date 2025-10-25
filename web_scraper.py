@@ -6,6 +6,7 @@ from selenium.webdriver.edge.options import Options
 from selenium.common.exceptions import NoSuchElementException, ElementNotInteractableException, TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By, ByType
 
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))  # Get directory of project
@@ -22,12 +23,10 @@ class WebScraper:
         options.add_argument("--no-sandbox")
         options.add_argument("--start-maximized")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_experimental_option("useAutomationExtension", False)
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_argument("disable-infobars")
 
-        # Scrape list of user agents to use
+        # User agents to rotate through
         user_agents = ["Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.10 Safari/605.1.1",
                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.3",
                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.3",
@@ -40,39 +39,55 @@ class WebScraper:
                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36 Edge/18.1958",
                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.",
                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.3"]
-        #response = requests.get("https://www.useragents.me/api").json()  # API endpoint doesn't work anymore
-        #for entry in response["data"]:
-        #    user_agents.append(entry["ua"])
 
         options.add_argument(f"user-agent={random.choice(user_agents)}")  # Pick random user agent to use
 
-        service = Service(executable_path=PROJECT_DIR + "\\msedgedriver.exe")  # Define custom webdriver executable
+        options.add_argument("--host-rules=MAP ads.google.com 127.0.0.1,MAP doubleclick.net 127.0.0.1,MAP adservice.google.com 127.0.0.1")
+
+        service = Service(executable_path=os.path.join(PROJECT_DIR, "WebStuff", "msedgedriver.exe"))  # Define custom webdriver executable
         # driver = webdriver.Chrome(options, service)
         self.driver = webdriver.Edge(options, service)
 
         self.driver.get("https://agar.io/#ffa")
-
         self.main_ui = self.driver.find_element("id", "mainui-app")
 
-    def get_canvas_image(self):
+        # Run JavaScript in console to remove ads periodically
+        hide_ads_script = """
+        setInterval(() => {
+            ['iframe', '#adsBottom', '#adbg'].forEach(s => {
+                document.querySelectorAll(s).forEach(e => e.remove());
+            });
+        }, 500);
+        """
+        self.driver.execute_script(hide_ads_script)
+
+        self.canvas_png = None
+
+    def screenshot_canvas_image(self):
         """
         Takes screenshot of the game canvas and returns it as bytes.
         :return: bytes
         """
         canvas = self.driver.find_element("tag name", "canvas")
-        return canvas.screenshot_as_png
+        self.canvas_png = canvas.screenshot_as_png
+        return self.canvas_png
 
-    def enter_name(self, name):
+    def enter_name(self, name: str, wait: bool):
         """
         Enters a name into the input field (if it exists) for the name when you start the game.
         Returns True on success, False otherwise.
-        :param name: string
+        :param name: str
+        :param wait: If we should wait for the name input
         :return: bool
         """
         try:
-            name_input = self.driver.find_element("id", "nick")
+            if wait:
+                if not self.wait_for_element(By.ID, "nick", 10):
+                    return False
+            name_input = self.driver.find_element(By.ID, "nick")
             if not name_input.is_displayed():
                 return False
+            name_input.clear()
             name_input.send_keys(name)
             return True
         except NoSuchElementException or ElementNotInteractableException:
@@ -86,14 +101,17 @@ class WebScraper:
         # main_ui element is disabled from display when we're playing
         return not self.main_ui.is_displayed()
 
-    def play_game(self):
+    def play_game(self, wait: bool):
         """
         Presses the play button if it exists.
         Returns True on success, False otherwise.
         :return: bool
         """
         try:
-            play_button = self.driver.find_element("id", "play")
+            if wait:
+                if not self.wait_for_element(By.ID, "play", 10):
+                    return False
+            play_button = self.driver.find_element(By.ID, "play")
             # Check if the button is hidden
             if not play_button.is_displayed():
                 return False
@@ -102,13 +120,17 @@ class WebScraper:
         except NoSuchElementException or ElementNotInteractableException:
             return False
 
-    def press_continue(self):
+    def press_continue(self, wait: bool):
         """
         Presses the continue button if it exists.
         Returns True on success, False otherwise.
+        :param: If we should wait for the continue button
         :return: bool
         """
         try:
+            if wait:
+                if not self.wait_for_element("id", "statsContinue", 10):
+                    return False
             continue_button = self.driver.find_element("id", "statsContinue")
             if not continue_button.is_displayed():
                 return False
@@ -117,12 +139,12 @@ class WebScraper:
         except NoSuchElementException or ElementNotInteractableException:
             return False
 
-    def wait_for_element(self, by: str, value: str, timeout: float):
+    def wait_for_element(self, by: ByType, value: str, timeout: float):
         """
         Waits for an element to be present and displayed on the page.
         Returns True on success, False otherwise.
-        :param by: string
-        :param value: string
+        :param by: str
+        :param value: str
         :param timeout: float
         :return: bool
         """
@@ -132,3 +154,32 @@ class WebScraper:
         except TimeoutException:
             return False
         return True
+
+    def get_stats(self, wait: bool):
+        """
+        Find stats once game ends (we die or time runs out)
+        :return: (food_eaten, time_alive, cells_eaten, highest_mass)
+        """
+        try:
+            if wait:
+                if not self.wait_for_element(By.CLASS_NAME, "stats-food-eaten", 10):
+                    return None
+            food_element = self.driver.find_element(By.CLASS_NAME, "stats-food-eaten")
+            time_alive_element = self.driver.find_element(By.CLASS_NAME, "stats-time-alive")
+            cells_element = self.driver.find_element(By.CLASS_NAME, "stats-cells-eaten")
+            highest_mass_element = self.driver.find_element(By.CLASS_NAME, "stats-highest-mass")
+
+            split_time = time_alive_element.text.split(":")
+            hours = 0
+            minutes = 0
+            if len(split_time) == 3:
+                hours = int(split_time[0])
+                minutes = int(split_time[1])
+            if len(split_time) == 2:
+                minutes = int(split_time[0])
+            seconds = int(split_time[-1])
+            time_alive = hours * 3600 + minutes * 60 + seconds
+
+            return int(food_element.text), time_alive, int(cells_element.text), int(highest_mass_element.text)
+        except NoSuchElementException or ElementNotInteractableException:
+            return None

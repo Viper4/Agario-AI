@@ -1,27 +1,147 @@
-from agent import AgarAgent
-from pynput import keyboard
-import threading
+from agent import BaseAgent, RNNAgent
+import torch
+import numpy as np
+from agent import Hyperparameters, FitnessWeights
+from multiprocessing import Pool
+from tqdm import tqdm
+import time
 
 
-def on_press(key):
-    print(f"Detected {key}")
-    if key == keyboard.Key.num_lock:
-        agar_agent.agent_running = not agar_agent.agent_running
-        if agar_agent.agent_running:
-            print("Agar Agent running")
-        else:
-            print("Agar Agent stopping")
-    elif key == keyboard.Key.esc:
-        print("Agar Agent exiting")
-        agar_agent.agent_running = False
-        agar_agent.program_running = False
-        listener.stop()
+class ModelBasedReflexTrainer:
+    def __init__(self):
+        pass
+
+    def run(self):
+        pass
+
+
+class GeneticTrainer:
+    def __init__(self, population_size, max_generations=None):
+        self.population_size = population_size
+        self.max_generations = max_generations
+        self.population = []
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def init_agents(self):
+        """
+        Initializes the population of agents with randomized parameters
+        :return:
+        """
+        hyperparameters = Hyperparameters(input_size=10, hidden_size=16, output_size=8,
+                                          run_interval=0.2,
+                                          param_mutations={"weight": 0.2, "bias": 0.1})
+        fitness_weights = FitnessWeights(food=0.75, time_alive=0.5, cells_eaten=2.0, highest_mass=1.5)
+        for i in range(self.population_size):
+            self.population.append(RNNAgent(hyperparameters, fitness_weights=fitness_weights,
+                                            randomize_params=True, device=self.device))
+
+    def reproduce(self, parent1: RNNAgent, parent2: RNNAgent, num_children: int):
+        """
+        Performs crossover between two parents and mutation to create n children.
+        Each child inherits half of its parameters from each parent
+        and is also mutated by Gaussian perturbation.
+        :param parent1:
+        :param parent2:
+        :param num_children: Number of children to create
+        :return: List of children
+        """
+        children = []
+        for i in range(num_children):
+            child = RNNAgent(parent1.hyperparameters, fitness_weights=parent1.fitness_weights,
+                             randomize_params=False, device=self.device)
+
+            # Crossover from both parents
+            for (param1, param2, param_child) in zip(
+                        parent1.rnn.parameters(),
+                        parent2.rnn.parameters(),
+                        child.rnn.parameters()):
+                # Random binary mask for mixing parameters
+                mask = torch.rand_like(param1) < 0.5
+                param_child.data.copy_(
+                    torch.where(mask, param1.data, param2.data)
+                )
+
+            # Also crossover the fully connected layer
+            for (param1, param2, param_child) in zip(
+                    parent1.fc.parameters(),
+                    parent2.fc.parameters(),
+                    child.fc.parameters()):
+                mask = torch.rand_like(param1) < 0.5
+                param_child.data.copy_(
+                    torch.where(mask, param1.data, param2.data)
+                )
+
+            child.mutate()
+            child.reduce_sigma(0.9)  # Reduce mutation strength
+            children.append(child)
+        return children
+
+    def train(self):
+        """
+        Starts the training loop
+        :return: Final population
+        """
+        generation = 0
+        self.init_agents()
+        while self.max_generations is None or generation < self.max_generations:
+            # Run agent games in parallel
+            pool = Pool()
+            jobs = []
+            for i in range(self.population_size):
+                jobs.append(pool.apply_async(self.population[i].run_game))
+            pool.close()
+            pool.join()
+
+            # Wait for all jobs to finish and collect fitness
+            total_fitness = 0.0
+            for job in tqdm(jobs, desc=f"Generation {generation}", total=self.population_size):
+                job.get()
+
+            # Print generation statistics
+            self.population.sort(key=lambda x: x.fitness, reverse=True)
+
+            print(f"Generation {generation} complete")
+            print(f"Mean fitness: {total_fitness / self.population_size:.2f}")
+            print(f"Fitness standard deviation: {repr(np.std([x.fitness for x in self.population]))}")
+            print(f"Rank\t\t|\t\tFitness")
+            print("-" * 20)
+            for i in range(self.population_size):
+                print(f"{i}\t\t|\t\t{repr(self.population[i].fitness)}")
+            print("-" * 20)
+
+            # Create new population
+            new_population = []
+            for i in range(0, self.population_size // 2, 2):
+                if i+1 >= self.population_size:
+                    break
+                parent1 = self.population[i]
+                parent2 = self.population[i + 1]
+
+                # Linear allocation of children based on rank
+                num_pairs = self.population_size // 2
+                b = 2 * (self.population_size - num_pairs) / (num_pairs * (num_pairs - 1))
+                a = 1 + b * (num_pairs - 1)
+                children = self.reproduce(parent1, parent2, a - b * i)
+                new_population.extend(children)
+            self.population = new_population
+            generation += 1
+        return self.population
 
 
 if __name__ == "__main__":
-    agar_agent = AgarAgent(0.25)
-    agent_thread = threading.Thread(target=agar_agent.run)
-    agent_thread.start()
+    command = input("Enter command> ")
+    if command == "train":
+        if input("Select trainer (0=Model Based, 1=Genetic)> ") == "0":
+            trainer = ModelBasedReflexTrainer()
+            trainer.train()
+        else:
+            trainer = GeneticTrainer(population_size=int(input("Enter population size> ")))
+            trainer.train()
+    elif command == "test":
+        fitness_weights = FitnessWeights(food=0.75, time_alive=0.5, cells_eaten=2.0, highest_mass=1.5)
+        agent = BaseAgent(0.25, fitness_weights)
+        while input("Run game? (Y/n)> ") == "Y":
+            print(f"Game finished with {agent.run_game()} fitness")
+    else:
+        print("Invalid command")
 
-    with keyboard.Listener(on_press=on_press) as listener:
-        listener.join()
