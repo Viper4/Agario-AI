@@ -1,4 +1,4 @@
-from agent import BaseAgent, RNNAgent
+from agent import BaseAgent, RNNAgent, ModelBasedReflexAgent
 import torch
 import numpy as np
 from agent import Hyperparameters, FitnessWeights
@@ -16,8 +16,10 @@ class ModelBasedReflexTrainer:
 
 
 class GeneticTrainer:
-    def __init__(self, population_size, max_generations=None):
+    def __init__(self, population_size: int, hyperparameters: Hyperparameters, fitness_weights: FitnessWeights, max_generations: int | None = None):
         self.population_size = population_size
+        self.hyperparameters = hyperparameters
+        self.fitness_weights = fitness_weights
         self.max_generations = max_generations
         self.population = []
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -27,12 +29,8 @@ class GeneticTrainer:
         Initializes the population of agents with randomized parameters
         :return:
         """
-        hyperparameters = Hyperparameters(input_size=10, hidden_size=16, output_size=8,
-                                          run_interval=0.2,
-                                          param_mutations={"weight": 0.2, "bias": 0.1})
-        fitness_weights = FitnessWeights(food=0.75, time_alive=0.5, cells_eaten=2.0, highest_mass=1.5)
         for i in range(self.population_size):
-            self.population.append(RNNAgent(hyperparameters, fitness_weights=fitness_weights,
+            self.population.append(RNNAgent(self.hyperparameters, fitness_weights=self.fitness_weights,
                                             randomize_params=True, device=self.device))
 
     def reproduce(self, parent1: RNNAgent, parent2: RNNAgent, num_children: int):
@@ -47,7 +45,7 @@ class GeneticTrainer:
         """
         children = []
         for i in range(num_children):
-            child = RNNAgent(parent1.hyperparameters, fitness_weights=parent1.fitness_weights,
+            child = RNNAgent(self.hyperparameters, fitness_weights=self.fitness_weights,
                              randomize_params=False, device=self.device)
 
             # Crossover from both parents
@@ -121,7 +119,7 @@ class GeneticTrainer:
                 num_pairs = self.population_size // 2
                 b = 2 * (self.population_size - num_pairs) / (num_pairs * (num_pairs - 1))
                 a = 1 + b * (num_pairs - 1)
-                children = self.reproduce(parent1, parent2, a - b * i)
+                children = self.reproduce(parent1, parent2, int(a - b * i))
                 new_population.extend(children)
             self.population = new_population
             generation += 1
@@ -129,19 +127,36 @@ class GeneticTrainer:
 
 
 if __name__ == "__main__":
+    # Max number of objects on screen at a time reaches ~50 so define fixed input of 32 objects with 8 nodes per object
+    hyperparameters = Hyperparameters(input_size=256, hidden_size=32, output_size=4,
+                                      run_interval=0.2,
+                                      param_mutations={"weight": 0.2, "bias": 0.1})
+    fitness_weights = FitnessWeights(food=0.75, time_alive=0.5, cells_eaten=2.0, highest_mass=1.5)
+
     command = input("Enter command> ")
     if command == "train":
         if input("Select trainer (0=Model Based, 1=Genetic)> ") == "0":
             trainer = ModelBasedReflexTrainer()
-            trainer.train()
+            #trainer.train()
         else:
-            trainer = GeneticTrainer(population_size=int(input("Enter population size> ")))
+            trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
+                                     hyperparameters=hyperparameters,
+                                     fitness_weights=fitness_weights)
             trainer.train()
-    elif command == "test":
-        fitness_weights = FitnessWeights(food=0.75, time_alive=0.5, cells_eaten=2.0, highest_mass=1.5)
+    elif command == "simple test":
         agent = BaseAgent(0.25, fitness_weights)
         while input("Run game? (Y/n)> ") == "Y":
             print(f"Game finished with {agent.run_game(visualize=False)} fitness")
+    elif command == "test":
+        if input("Select model to test (0=Model Based, 1=Neural Network)> ") == "0":
+            model_based_agent = ModelBasedReflexAgent(run_interval=0.1, fitness_weights=fitness_weights)
+            model_based_agent.run_game(True)
+        else:
+            network_agent = RNNAgent(hyperparameters=hyperparameters,
+                                     fitness_weights=fitness_weights,
+                                     randomize_params=False,
+                                     device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+            network_agent.run_game(True)
     else:
         print("Invalid command")
 

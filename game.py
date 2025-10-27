@@ -13,6 +13,14 @@ class Vector:
         """
         return math.sqrt(self.x ** 2 + self.y ** 2)
 
+    def normalize(self):
+        """
+        Normalizes this vector to a length of 1
+        :return: Vector
+        """
+        magnitude = self.magnitude()
+        return Vector(self.x / magnitude, self.y / magnitude)
+
     def __str__(self):
         return f"({self.x}, {self.y})"
 
@@ -41,6 +49,36 @@ class GameObject:
 
         self.bounding_box = (Vector(min(self.bounding_box[0].x, other_bounding_box[0].x), min(self.bounding_box[0].y, other_bounding_box[0].y)),
                              Vector(max(self.bounding_box[1].x, other_bounding_box[1].x), max(self.bounding_box[1].y, other_bounding_box[1].y)))
+
+    def linear_edge_distance(self, other_bounding_box):
+        """
+        Calculate the distance between the closest edges of this bounding box and the given bounding box
+        :param other_bounding_box: (Vector, Vector)
+        :return: tuple of (dx, dy)
+        """
+        x1, y1 = self.bounding_box[0].x, self.bounding_box[0].y  # top left corner
+        x2, y2 = self.bounding_box[1].x, self.bounding_box[1].y  # bottom right corner
+        x1b, y1b = other_bounding_box[0].x, other_bounding_box[0].y  # top left corner
+        x2b, y2b = other_bounding_box[1].x, other_bounding_box[1].y  # bottom right corner
+
+        left = x2b < x1  # other is to the left
+        right = x1b > x2 # other is to the right
+        top = y2b > y1 # other is above
+        bottom = y1b < y2 # other is below
+
+        dx = 0.0
+        dy = 0.0
+        if left:
+            dx = x1 - x2b
+        elif right:
+            dx = x1b - x2
+        if top:
+            dy = y1b - y2
+        elif bottom:
+            dy = y1 - y2b
+
+        return dx, dy
+
 
     def copy(self):
         return GameObject(self.label, self.pos, self.area, self.perimeter, self.circularity, self.density, self.bounding_box)

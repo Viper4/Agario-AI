@@ -45,7 +45,7 @@ class BaseAgent(threading.Thread):
         """
         Generates random ID for new username and plays the game
         """
-        random_id = random.randint(0, 10000)  # ID for this agent, can use as name in game to differentiate it (maybe)
+        random_id = random.randint(100, 1000)  # ID for this agent, can use as name in game to differentiate it (maybe)
 
         self.scraper.press_continue(wait=True)
 
@@ -68,14 +68,13 @@ class BaseAgent(threading.Thread):
         objects = self.image_processor.object_recognition(img, visualize, verbose)
         return objects
 
-    def run_game(self, visualize: bool = False):
+    def run_game(self, visualize: bool):
         """
         Runs a game for this agent with no logic for testing purposes.
         Basically manual control for the agent's logic to test object recognition and fitness calculation.
         :return:
         """
         self.start_game()
-        prev_len = 0
         while self.program_running:
             if self.scraper.in_game():
                 self.alive = True
@@ -171,6 +170,7 @@ class RNNAgent(BaseAgent):
         Runs a single game for this agent
         :return: fitness
         """
+        max_input_objects = self.hyperparameters.input_size // 8
         self.start_game()
         while self.program_running:
             if self.scraper.in_game():
@@ -179,18 +179,40 @@ class RNNAgent(BaseAgent):
 
                 # Convert objects list to useable input for the network
                 x = torch.zeros((1, self.hyperparameters.input_size))
-                # Just define fixed size of 48 closest objects (From testing, maximum number of objects on screen at a time is around 50)
-                # Each object has 6 nodes (label, distance, direction, speed, area, density)
-                environment = np.array((128, 8))
-                for i in range(8):
-                    for j in range(16):
-                        environment[i*16+j] = [0, 0, 0, 0, 0, 0, 0]
-                for o in objects:
-                    pass
+                # 8 input nodes per object
+                # The 8 nodes are formatted: (food, virus, player, pos x, pos y, area, perimeter, density)
+                i = 0
+                while i < max_input_objects and i < len(objects):
+                    obj = objects[i]
+
+                    # Encode label as one-hot
+                    nodes = [0, 0, 0,
+                             obj.pos.x,
+                             obj.pos.y,
+                             obj.area,
+                             obj.perimeter,
+                             obj.density]
+                    if obj.label == "food":
+                        nodes[0] = 1
+                    elif obj.label == "player":
+                        nodes[1] = 1
+                    elif obj.label == "virus":
+                        nodes[2] = 1
+
+                    # Insert into x tensor
+                    start = i * 8
+                    end = start + 8
+                    x[0, start:end] = torch.tensor(nodes, dtype=torch.float32)
+                    i += 1
 
                 output = self.forward(x)
-                # Take action based on output
-
+                # Take action with output: (move x, move y, split, eject)
+                move_x, move_y, split, eject = output[0]
+                self.scraper.move(move_x, move_y, 1)
+                if split > 0:
+                    self.scraper.press_space()
+                if eject > 0:
+                    self.scraper.press_w()
             else:
                 if self.alive:  # Just died
                     stats = self.scraper.get_stats(wait=True)

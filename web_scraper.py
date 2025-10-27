@@ -7,6 +7,8 @@ from selenium.common.exceptions import NoSuchElementException, ElementNotInterac
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By, ByType
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
 
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))  # Get directory of project
@@ -50,6 +52,8 @@ class WebScraper:
 
         self.driver.get("https://agar.io/#ffa")
         self.main_ui = self.driver.find_element("id", "mainui-app")
+        self.canvas = self.driver.find_element("tag name", "canvas")
+        self.actions = ActionChains(self.driver)
 
         # Run JavaScript in console to remove ads periodically
         hide_ads_script = """
@@ -68,8 +72,7 @@ class WebScraper:
         Takes screenshot of the game canvas and returns it as bytes.
         :return: bytes
         """
-        canvas = self.driver.find_element("tag name", "canvas")
-        self.canvas_png = canvas.screenshot_as_png
+        self.canvas_png = self.canvas.screenshot_as_png
         return self.canvas_png
 
     def enter_name(self, name: str, wait: bool):
@@ -82,7 +85,7 @@ class WebScraper:
         """
         try:
             if wait:
-                if not self.wait_for_element(By.ID, "nick", 10):
+                if not self.wait_for_element(By.ID, "nick", 5):
                     return False
             name_input = self.driver.find_element(By.ID, "nick")
             if not name_input.is_displayed():
@@ -109,7 +112,7 @@ class WebScraper:
         """
         try:
             if wait:
-                if not self.wait_for_element(By.ID, "play", 10):
+                if not self.wait_for_element(By.ID, "play", 5):
                     return False
             play_button = self.driver.find_element(By.ID, "play")
             # Check if the button is hidden
@@ -129,7 +132,7 @@ class WebScraper:
         """
         try:
             if wait:
-                if not self.wait_for_element("id", "statsContinue", 10):
+                if not self.wait_for_element("id", "statsContinue", 5):
                     return False
             continue_button = self.driver.find_element("id", "statsContinue")
             if not continue_button.is_displayed():
@@ -162,7 +165,7 @@ class WebScraper:
         """
         try:
             if wait:
-                if not self.wait_for_element(By.CLASS_NAME, "stats-food-eaten", 10):
+                if not self.wait_for_element(By.CLASS_NAME, "stats-food-eaten", 5):
                     return None
             food_element = self.driver.find_element(By.CLASS_NAME, "stats-food-eaten")
             time_alive_element = self.driver.find_element(By.CLASS_NAME, "stats-time-alive")
@@ -170,16 +173,34 @@ class WebScraper:
             highest_mass_element = self.driver.find_element(By.CLASS_NAME, "stats-highest-mass")
 
             split_time = time_alive_element.text.split(":")
-            hours = 0
-            minutes = 0
-            if len(split_time) == 3:
-                hours = int(split_time[0])
-                minutes = int(split_time[1])
-            if len(split_time) == 2:
-                minutes = int(split_time[0])
-            seconds = int(split_time[-1])
-            time_alive = hours * 3600 + minutes * 60 + seconds
+            while len(split_time) < 3:
+                split_time.insert(0, "0")
+            hours, minutes, seconds = split_time
+            time_alive = int(hours) * 3600 + int(minutes) * 60 + int(seconds)
 
             return int(food_element.text), time_alive, int(cells_element.text), int(highest_mass_element.text)
         except NoSuchElementException or ElementNotInteractableException:
             return None
+
+    def press_space(self):
+        """
+        Sends space key to split
+        """
+        self.actions.send_keys(Keys.SPACE).perform()
+
+    def press_w(self):
+        """
+        Sends w key to eject
+        """
+        self.actions.send_keys("w").perform()
+
+    def move(self, x, y, scale):
+        """
+        Moves the mouse to the center of the screen with offset (x, y)*scale.
+        The cursor placement needed to move can somtimes vary depending on how the player split,
+        but offsetting from the center of the screen is a good enough approximation.
+        :param x: float
+        :param y: float
+        :param scale: float
+        """
+        self.actions.move_to_element_with_offset(self.canvas, x, y).perform()

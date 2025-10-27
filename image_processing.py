@@ -4,6 +4,7 @@ import json
 import pytesseract
 from PIL import Image
 import game
+import time
 
 
 class ImageProcessing:
@@ -79,7 +80,11 @@ class ImageProcessing:
                     result = np.bitwise_or(result, dilated_mask)
 
                 masked_imgs[mask_type] = cv2.bitwise_and(img_hsv, img_hsv, mask=result)
+                start_time = time.time()
                 objects.extend(self.parse_contours_to_objects(self.pre_processing(masked_imgs[mask_type]), label=mask_type, verbose=verbose))
+                if verbose:
+                    print(f"Object recognition for {mask_type} took {time.time() - start_time:.2f} seconds")
+
                 # Remove objects from general image that are in masked_imgs[mask_type] so we dont overwrite them
                 mask_result = cv2.bitwise_and(mask_result, cv2.bitwise_not(result))
 
@@ -89,7 +94,10 @@ class ImageProcessing:
                     cv2.resizeWindow(f"{mask_type} mask", 1200, 800)
                     cv2.imshow(f"{mask_type} mask", masked_imgs[mask_type])
         masked_img = cv2.bitwise_and(img_hsv, img_hsv, mask=mask_result)
+        start_time = time.time()
         objects.extend(self.parse_contours_to_objects(self.pre_processing(masked_img), label="unknown", verbose=verbose))
+        if verbose:
+            print(f"Object recognition for unknown took {time.time() - start_time:.2f} seconds")
 
         if visualize:
             # Visualize default object mask
@@ -134,9 +142,14 @@ class ImageProcessing:
         # Cache settings outside the loop to avoid repeated dict lookups
         settings = self.cluster_settings.get(label, {})
         identify_by = settings.get("identify_by")
+        cluster_by = settings.get("cluster_by", "center")
         max_density = settings.get("max_density", 1)
         cluster_distance = settings.get("cluster_distance", 0)
+        cluster_distance_sq = cluster_distance * cluster_distance
         variants = settings.get("variants", None)
+
+        img_center_x = img.shape[1] / 2
+        img_center_y = img.shape[0] / 2
 
         objects = []
         contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -150,11 +163,10 @@ class ImageProcessing:
                 continue  # Avoid divide-by-zero
 
             circularity = 4 * np.pi * (area / (perimeter ** 2))  # Calculate how circular the object is
-            approx = cv2.approxPolyDP(cnt, 0.02 * perimeter, True)  # Approximate the object's shape
-            x, y, w, h = cv2.boundingRect(approx)  # Get the object's bounding box
+            x, y, w, h = cv2.boundingRect(cnt)  # Get the object's bounding box
             half_w = w * 0.5
             half_h = h * 0.5
-            origin = game.Vector(x + half_w, y + half_h)  # Position of the center of the object relative to the image
+            origin = game.Vector(x + half_w - img_center_x, y + half_h - img_center_y)  # Position of the center of the object relative to the image center
 
             if verbose:
                 print(f"Detected contour at {origin}: A={area}, P={perimeter}, C={circularity}")
@@ -165,8 +177,10 @@ class ImageProcessing:
                     for key, value in variants.items():
                         if value["min_perimeter"] < perimeter < value["max_perimeter"]:
                             label = key
+                            cluster_by = value.get("cluster_by", cluster_by)
                             max_density = value.get("max_density", max_density)
                             cluster_distance = value.get("cluster_distance", cluster_distance)
+                            cluster_distance_sq = cluster_distance * cluster_distance
                             break
 
             obj = game.GameObject(label=label,
@@ -186,9 +200,14 @@ class ImageProcessing:
                     if other_obj.label != label:
                         continue
 
+                    # Cluster by center by default
                     dx = obj.pos.x - other_obj.pos.x
                     dy = obj.pos.y - other_obj.pos.y
-                    if dx * dx + dy * dy < cluster_distance ** 2:
+                    if cluster_by == "edge":
+                        # Cluster by distance between closest edges of bounding boxes
+                        dx, dy = obj.linear_edge_distance(other_obj.bounding_box)
+
+                    if dx * dx + dy * dy < cluster_distance_sq:
                         # Update position as weighted average by area
                         # (x, y) = (A1x1 + A2x2) / (A1+A2), (A1y1 + A2y2) / (A1+A2)
                         total_area = other_obj.area + obj.area
