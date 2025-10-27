@@ -62,9 +62,9 @@ class GameObject:
         x2b, y2b = other_bounding_box[1].x, other_bounding_box[1].y  # bottom right corner
 
         left = x2b < x1  # other is to the left
-        right = x1b > x2 # other is to the right
-        top = y2b > y1 # other is above
-        bottom = y1b < y2 # other is below
+        right = x1b > x2  # other is to the right
+        top = y2b > y1  # other is above
+        bottom = y1b < y2  # other is below
 
         dx = 0.0
         dy = 0.0
@@ -78,7 +78,6 @@ class GameObject:
             dy = y1 - y2b
 
         return dx, dy
-
 
     def copy(self):
         return GameObject(self.label, self.pos, self.area, self.perimeter, self.circularity, self.density, self.bounding_box)
@@ -104,14 +103,3 @@ def get_distance(p1: Vector, p2: Vector):
     """
     return ((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2) ** 0.5
 
-
-def get_normalized_direction(p1: Vector, p2: Vector):
-    """
-    Calculates normalized direction from point 1 to point 2
-    :param p1: first point
-    :param p2: second point
-    :return: direction vector
-    """
-    direction = Vector(p2.x - p1.x, p2.y - p1.y)
-    magnitude = direction.magnitude()
-    return Vector(direction.x / magnitude, direction.y / magnitude)

@@ -86,7 +86,7 @@ class GeneticTrainer:
             pool = Pool()
             jobs = []
             for i in range(self.population_size):
-                jobs.append(pool.apply_async(self.population[i].run_game, args=(True,)))
+                jobs.append(pool.apply_async(self.population[i].run_web_game, args=(True,)))
             pool.close()
             pool.join()
 
@@ -143,20 +143,20 @@ if __name__ == "__main__":
                                      hyperparameters=hyperparameters,
                                      fitness_weights=fitness_weights)
             trainer.train()
-    elif command == "simple test":
-        agent = BaseAgent(0.25, fitness_weights)
-        while input("Run game? (Y/n)> ") == "Y":
-            print(f"Game finished with {agent.run_game(visualize=False)} fitness")
     elif command == "test":
-        if input("Select model to test (0=Model Based, 1=Neural Network)> ") == "0":
+        model_selection = input("Select model to test (-1=None, 0=Model Based, 1=Neural Network)> ") == "0"
+        if model_selection == "-1":
+            agent = BaseAgent(0.25, fitness_weights)
+            print(f"Game finished with {agent.run_web_game(visualize=False)} fitness")
+        elif model_selection == "0":
             model_based_agent = ModelBasedReflexAgent(run_interval=0.1, fitness_weights=fitness_weights)
-            model_based_agent.run_game(True)
-        else:
+            print(f"Game finished with {model_based_agent.run_web_game(True)}")
+        elif model_selection == "1":
             network_agent = RNNAgent(hyperparameters=hyperparameters,
                                      fitness_weights=fitness_weights,
                                      randomize_params=False,
                                      device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-            network_agent.run_game(True)
+            print(f"Game finished with {network_agent.run_web_game(True)} fitness")
     else:
         print("Invalid command")
 

@@ -10,13 +10,13 @@
     "variants": {
       "food": {
         "min_perimeter": 25.0,
-        "max_perimeter": 150.0,
+        "max_perimeter": 175.0,
         "cluster_by": "center",
         "max_density": 32,
         "cluster_distance": 175.0
       },
       "player": {
-        "min_perimeter": 150.0,
+        "min_perimeter": 175.0,
         "max_perimeter": 1000000.0
       }
     }

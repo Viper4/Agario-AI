@@ -7,7 +7,6 @@ from web_scraper import WebScraper
 import random
 import torch
 import numpy as np
-import game
 
 
 class Hyperparameters:
@@ -41,9 +40,9 @@ class BaseAgent(threading.Thread):
         self.fitness_weights = fitness_weights
         self.fitness = 0.0
 
-    def start_game(self):
+    def start_web_game(self):
         """
-        Generates random ID for new username and plays the game
+        Generates random ID for new username and start a game on agar.io
         """
         random_id = random.randint(100, 1000)  # ID for this agent, can use as name in game to differentiate it (maybe)
 
@@ -59,26 +58,26 @@ class BaseAgent(threading.Thread):
 
         print("Game started")
 
-    def get_game_data(self, visualize: bool = False, verbose: bool = False):
+    def get_web_game_data(self, visualize: bool = False, verbose: bool = False):
         """
-        Extracts data from the game
+        Extracts data from the web game via the scraper
         """
         canvas_png = self.scraper.screenshot_canvas_image()
         img = self.image_processor.convert_to_mat(canvas_png)
         objects = self.image_processor.object_recognition(img, visualize, verbose)
         return objects
 
-    def run_game(self, visualize: bool):
+    def run_web_game(self, visualize: bool):
         """
-        Runs a game for this agent with no logic for testing purposes.
+        Runs a game on agar.io using the web scraper for this agent with no logic for testing purposes.
         Basically manual control for the agent's logic to test object recognition and fitness calculation.
         :return:
         """
-        self.start_game()
+        self.start_web_game()
         while self.program_running:
             if self.scraper.in_game():
                 self.alive = True
-                objects = self.get_game_data(visualize=True, verbose=True)
+                objects = self.get_web_game_data(visualize=visualize, verbose=True)
                 print(f"\nObjects: {objects}")
             else:
                 if self.alive:  # Just died
@@ -142,6 +141,13 @@ class RNNAgent(BaseAgent):
         """
         torch.save((self.hyperparameters, self.rnn, self.fc), "agent.pth")
 
+    def load_agent(self, path: str):
+        """
+        Loads hyperparameters, RNN, and FC layer from the given path
+        :param path: str
+        """
+        self.hyperparameters, self.rnn, self.fc = torch.load(path)
+
     def reduce_sigma(self, factor: float):
         """
         Reduce the standard deviation of mutation to the agent as the agent becomes more fit.
@@ -165,17 +171,28 @@ class RNNAgent(BaseAgent):
             noise = torch.randn_like(param) * sigma  # Gaussian noise
             param.data.add_(noise)
 
-    def run_game(self, visualize: bool):
+    def run_training_loop(self):
         """
-        Runs a single game for this agent
+        Runs the training loop for this agent using the custom agar game environment.
+        :return:
+        """
+        max_input_objects = self.hyperparameters.input_size // 8
+        while self.program_running:
+            pass
+        return self.fitness
+
+    def run_web_game(self, visualize: bool):
+        """
+        Runs a single game for this agent on agar.io using the web scraper.
+        Meant for testing purposes not for training.
         :return: fitness
         """
         max_input_objects = self.hyperparameters.input_size // 8
-        self.start_game()
+        self.start_web_game()
         while self.program_running:
             if self.scraper.in_game():
                 self.alive = True
-                objects = self.get_game_data(visualize=visualize)
+                objects = self.get_web_game_data(visualize=visualize)
 
                 # Convert objects list to useable input for the network
                 x = torch.zeros((1, self.hyperparameters.input_size))

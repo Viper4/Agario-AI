@@ -3,7 +3,7 @@ import numpy as np
 import json
 import pytesseract
 from PIL import Image
-import game
+import geometry_utils
 import time
 
 
@@ -81,7 +81,9 @@ class ImageProcessing:
 
                 masked_imgs[mask_type] = cv2.bitwise_and(img_hsv, img_hsv, mask=result)
                 start_time = time.time()
-                objects.extend(self.parse_contours_to_objects(self.pre_processing(masked_imgs[mask_type]), label=mask_type, verbose=verbose))
+                objects.extend(
+                    self.parse_contours_to_objects(self.pre_processing(masked_imgs[mask_type]), label=mask_type,
+                                                   verbose=verbose))
                 if verbose:
                     print(f"Object recognition for {mask_type} took {time.time() - start_time:.2f} seconds")
 
@@ -95,7 +97,8 @@ class ImageProcessing:
                     cv2.imshow(f"{mask_type} mask", masked_imgs[mask_type])
         masked_img = cv2.bitwise_and(img_hsv, img_hsv, mask=mask_result)
         start_time = time.time()
-        objects.extend(self.parse_contours_to_objects(self.pre_processing(masked_img), label="unknown", verbose=verbose))
+        objects.extend(
+            self.parse_contours_to_objects(self.pre_processing(masked_img), label="unknown", verbose=verbose))
         if verbose:
             print(f"Object recognition for unknown took {time.time() - start_time:.2f} seconds")
 
@@ -120,7 +123,8 @@ class ImageProcessing:
                             org=(x1, y1 - 10),
                             fontFace=cv2.FONT_HERSHEY_COMPLEX, fontScale=0.6,
                             color=(0, 255, 0), thickness=2)
-                cv2.putText(self.img_visualization, text=f"A={obj.area:.2f} P={obj.perimeter:.2f} C={obj.circularity:.2f}",
+                cv2.putText(self.img_visualization,
+                            text=f"A={obj.area:.2f} P={obj.perimeter:.2f} C={obj.circularity:.2f}",
                             org=(x1, y2 + 15),
                             fontFace=cv2.FONT_HERSHEY_COMPLEX, fontScale=0.6,
                             color=(0, 255, 0), thickness=2)
@@ -166,7 +170,8 @@ class ImageProcessing:
             x, y, w, h = cv2.boundingRect(cnt)  # Get the object's bounding box
             half_w = w * 0.5
             half_h = h * 0.5
-            origin = game.Vector(x + half_w - img_center_x, y + half_h - img_center_y)  # Position of the center of the object relative to the image center
+            origin = geometry_utils.Vector(x + half_w - img_center_x,
+                                           y + half_h - img_center_y)  # Position of the center of the object relative to the image center
 
             if verbose:
                 print(f"Detected contour at {origin}: A={area}, P={perimeter}, C={circularity}")
@@ -183,13 +188,13 @@ class ImageProcessing:
                             cluster_distance_sq = cluster_distance * cluster_distance
                             break
 
-            obj = game.GameObject(label=label,
-                                  pos=origin,
-                                  perimeter=perimeter,
-                                  area=area,
-                                  circularity=circularity,
-                                  density=1,
-                                  bounding_box=(game.Vector(x, y), game.Vector(x + w, y + h)))
+            obj = geometry_utils.GameObject(label=label,
+                                            pos=origin,
+                                            perimeter=perimeter,
+                                            area=area,
+                                            circularity=circularity,
+                                            density=1,
+                                            bounding_box=(geometry_utils.Vector(x, y), geometry_utils.Vector(x + w, y + h)))
 
             # Clustering
             if max_density > 1:
@@ -211,7 +216,7 @@ class ImageProcessing:
                         # Update position as weighted average by area
                         # (x, y) = (A1x1 + A2x2) / (A1+A2), (A1y1 + A2y2) / (A1+A2)
                         total_area = other_obj.area + obj.area
-                        other_obj.pos = game.Vector(
+                        other_obj.pos = geometry_utils.Vector(
                             int((other_obj.area * other_obj.pos.x + obj.area * obj.pos.x) / total_area),
                             int((other_obj.area * other_obj.pos.y + obj.area * obj.pos.y) / total_area))
 
