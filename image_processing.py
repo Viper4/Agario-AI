@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 import json
 import pytesseract
-from PIL import Image
 import geometry_utils
 import time
 
@@ -119,7 +118,7 @@ class ImageProcessing:
                               pt1=(x1, y1),
                               pt2=(x2, y2),
                               color=(0, 255, 0), thickness=2)
-                cv2.putText(self.img_visualization, text=f"{obj.label} n={obj.density}",
+                cv2.putText(self.img_visualization, text=f"{obj.label} n={obj.count}",
                             org=(x1, y1 - 10),
                             fontFace=cv2.FONT_HERSHEY_COMPLEX, fontScale=0.6,
                             color=(0, 255, 0), thickness=2)
@@ -147,7 +146,7 @@ class ImageProcessing:
         settings = self.cluster_settings.get(label, {})
         identify_by = settings.get("identify_by")
         cluster_by = settings.get("cluster_by", "center")
-        max_density = settings.get("max_density", 1)
+        max_count = settings.get("max_count", 1)
         cluster_distance = settings.get("cluster_distance", 0)
         cluster_distance_sq = cluster_distance * cluster_distance
         variants = settings.get("variants", None)
@@ -183,7 +182,7 @@ class ImageProcessing:
                         if value["min_perimeter"] < perimeter < value["max_perimeter"]:
                             label = key
                             cluster_by = value.get("cluster_by", cluster_by)
-                            max_density = value.get("max_density", max_density)
+                            max_count = value.get("max_count", max_count)
                             cluster_distance = value.get("cluster_distance", cluster_distance)
                             cluster_distance_sq = cluster_distance * cluster_distance
                             break
@@ -193,14 +192,14 @@ class ImageProcessing:
                                             perimeter=perimeter,
                                             area=area,
                                             circularity=circularity,
-                                            density=1,
+                                            count=1,
                                             bounding_box=(geometry_utils.Vector(x, y), geometry_utils.Vector(x + w, y + h)))
 
             # Clustering
-            if max_density > 1:
+            if max_count > 1:
                 # Try merging this object with any nearby cluster
                 for other_obj in objects:
-                    if other_obj.density >= max_density:
+                    if other_obj.count >= max_count:
                         continue
                     if other_obj.label != label:
                         continue
@@ -210,7 +209,7 @@ class ImageProcessing:
                     dy = obj.pos.y - other_obj.pos.y
                     if cluster_by == "edge":
                         # Cluster by distance between closest edges of bounding boxes
-                        dx, dy = obj.linear_edge_distance(other_obj.bounding_box)
+                        dx, dy = obj.linear_bounds_distance(other_obj.bounding_box)
 
                     if dx * dx + dy * dy < cluster_distance_sq:
                         # Update position as weighted average by area
@@ -222,7 +221,7 @@ class ImageProcessing:
 
                         other_obj.area = total_area
                         other_obj.perimeter += obj.perimeter
-                        other_obj.density += 1
+                        other_obj.count += 1
                         other_obj.circularity = (other_obj.circularity + obj.circularity) / 2
                         other_obj.extend_bounds(obj.bounding_box)
                         break

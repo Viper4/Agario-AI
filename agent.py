@@ -197,7 +197,7 @@ class RNNAgent(BaseAgent):
                 # Convert objects list to useable input for the network
                 x = torch.zeros((1, self.hyperparameters.input_size))
                 # 8 input nodes per object
-                # The 8 nodes are formatted: (food, virus, player, pos x, pos y, area, perimeter, density)
+                # The 8 nodes are formatted: (food, virus, player, pos x, pos y, area, perimeter, count)
                 i = 0
                 while i < max_input_objects and i < len(objects):
                     obj = objects[i]
@@ -208,7 +208,7 @@ class RNNAgent(BaseAgent):
                              obj.pos.y,
                              obj.area,
                              obj.perimeter,
-                             obj.density]
+                             obj.count]
                     if obj.label == "food":
                         nodes[0] = 1
                     elif obj.label == "player":

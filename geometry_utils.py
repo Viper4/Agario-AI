@@ -32,13 +32,13 @@ class Vector:
 
 
 class GameObject:
-    def __init__(self, label: str, pos: Vector, area: float, perimeter: float, circularity: float, density: int, bounding_box: tuple[Vector, Vector]):
+    def __init__(self, label: str, pos: Vector, area: float, perimeter: float, circularity: float, count: int, bounding_box: tuple[Vector, Vector]):
         self.label = label
         self.pos = pos
         self.area = area
         self.perimeter = perimeter
         self.circularity = circularity
-        self.density = density
+        self.count = count
         self.bounding_box = bounding_box  # First pair is top left corner, second pair is bottom right: ((x1, y1), (x2, y2))
 
     def extend_bounds(self, other_bounding_box: tuple[Vector, Vector]):
@@ -46,11 +46,10 @@ class GameObject:
         Expands this object's bounding box to include the given bounding box
         :param other_bounding_box:
         """
-
         self.bounding_box = (Vector(min(self.bounding_box[0].x, other_bounding_box[0].x), min(self.bounding_box[0].y, other_bounding_box[0].y)),
                              Vector(max(self.bounding_box[1].x, other_bounding_box[1].x), max(self.bounding_box[1].y, other_bounding_box[1].y)))
 
-    def linear_edge_distance(self, other_bounding_box):
+    def linear_bounds_distance(self, other_bounding_box):
         """
         Calculate the distance between the closest edges of this bounding box and the given bounding box
         :param other_bounding_box: (Vector, Vector)
@@ -80,7 +79,7 @@ class GameObject:
         return dx, dy
 
     def copy(self):
-        return GameObject(self.label, self.pos, self.area, self.perimeter, self.circularity, self.density, self.bounding_box)
+        return GameObject(self.label, self.pos, self.area, self.perimeter, self.circularity, self.count, self.bounding_box)
 
     def __str__(self):
         return f"{self.label}: ({self.pos.x}, {self.pos.y})"
@@ -91,7 +90,7 @@ class GameObject:
     def __eq__(self, other):
         return (self.label == other.label and self.pos == other.pos and self.area == other.area and
                 self.perimeter == other.perimeter and self.circularity == other.circularity and
-                self.density == other.density)
+                self.count == other.count)
 
 
 def get_distance(p1: Vector, p2: Vector):

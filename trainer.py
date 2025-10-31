@@ -109,18 +109,22 @@ class GeneticTrainer:
 
             # Create new population
             new_population = []
-            for i in range(0, self.population_size // 2, 2):
+            num_parents = self.population_size // 2
+            for i in range(0, num_parents, 2):
                 if i+1 >= self.population_size:
                     break
+                # Reproduce in pairs: 0: (0,1), 1: (2,3),..., floor(n/4): (floor(n/2)-1,floor(n/2))
                 parent1 = self.population[i]
                 parent2 = self.population[i + 1]
 
                 # Linear allocation of children based on rank
-                num_pairs = self.population_size // 2
-                b = 2 * (self.population_size - num_pairs) / (num_pairs * (num_pairs - 1))
-                a = 1 + b * (num_pairs - 1)
-                children = self.reproduce(parent1, parent2, int(a - b * i))
+                a = 4
+                b = a / num_parents
+                children = self.reproduce(parent1, parent2, int(a-b*i + a-b*(i+1)))
                 new_population.extend(children)
+            diff = self.population_size - len(new_population)
+            if diff > 0:
+                new_population.extend(self.population[-diff:])
             self.population = new_population
             generation += 1
         return self.population
@@ -144,14 +148,14 @@ if __name__ == "__main__":
                                      fitness_weights=fitness_weights)
             trainer.train()
     elif command == "test":
-        model_selection = input("Select model to test (-1=None, 0=Model Based, 1=Neural Network)> ") == "0"
-        if model_selection == "-1":
+        model_selection = input("Select model to test (0=None, 1=Model Based, 2=Neural Network)> ")
+        if model_selection == "0":
             agent = BaseAgent(0.25, fitness_weights)
-            print(f"Game finished with {agent.run_web_game(visualize=False)} fitness")
-        elif model_selection == "0":
+            print(f"Game finished with {agent.run_web_game(visualize=True)} fitness")
+        elif model_selection == "1":
             model_based_agent = ModelBasedReflexAgent(run_interval=0.1, fitness_weights=fitness_weights)
             print(f"Game finished with {model_based_agent.run_web_game(True)}")
-        elif model_selection == "1":
+        elif model_selection == "2":
             network_agent = RNNAgent(hyperparameters=hyperparameters,
                                      fitness_weights=fitness_weights,
                                      randomize_params=False,
