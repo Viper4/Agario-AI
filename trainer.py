@@ -120,11 +120,16 @@ class GeneticTrainer:
                 # Linear allocation of children based on rank
                 a = 4
                 b = a / num_parents
-                children = self.reproduce(parent1, parent2, int(a-b*i + a-b*(i+1)))
+                children = self.reproduce(parent1, parent2, round(a-b*i + a-b*(i+1)))
                 new_population.extend(children)
             diff = self.population_size - len(new_population)
-            if diff > 0:
+            if diff < 0:  # Too many children
+                # Cutoff the bottom
+                new_population = new_population[:self.population_size]
+            elif diff > 0:  # Not enough children
+                # Add the best agents from the previous generation
                 new_population.extend(self.population[-diff:])
+
             self.population = new_population
             generation += 1
         return self.population
