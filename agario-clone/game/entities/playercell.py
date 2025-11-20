@@ -11,26 +11,25 @@ class PlayerCell(Cell, interfaces.Killer):
     """Represents player cell(part of player) state."""
 
     BORDER_WIDTH = 5
-    MAX_SPEED = 10
     # size of player when created
     SIZES = (5,)
     SIZES_CUM = (1,)
 
     # min ratius of cell to be able shoot
-    SHOOTCELL_COND_RADIUS = 40
-    SHOOTCELL_RADIUS = 10
-    SHOOTCELL_SPEED = Cell.MAX_SPEED
+    SHOOTCELL_COND_RADIUS = 48
+    SHOOTCELL_RADIUS = 24
+    SHOOTCELL_SPEED = 2
 
     # min ratius of cell to be able split
     SPLITCELL_COND_RADIUS = 40
     SPLITCELL_SPEED = 3
-    # the time that must pass before сell can connect to another cell
-    SPLIT_TIMETOUT = 240
+    # the time before a сell can merge with another cell
+    SPLIT_TIMEOUT = 1800  # Number of frames. Should be 30 seconds which is 1800 frames in 60 FPS.
 
     def __init__(self, pos, radius, color, angle=0, speed=0):
         super().__init__(pos, radius, color, angle, speed)
-        # time after which it will be possible to connect to another cell
-        self.split_timeout = self.SPLIT_TIMETOUT
+        # merge_time = 30 + cell mass * 2.33%
+        self.split_timeout = self.SPLIT_TIMEOUT + int(self.mass() * 0.0233)
         # food storage, to make the radius change smooth
         self.area_pool = 0
 

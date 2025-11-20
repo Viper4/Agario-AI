@@ -4,6 +4,7 @@ import time
 from loguru import logger
 
 from .entities import Cell
+from .entities import Virus
 
 
 class Model():
@@ -42,9 +43,9 @@ class Model():
         """Update passed player velocity."""
         player.update_velocity(angle, speed)
 
-    def shoot(self, player, angle):
+    def shoot(self, player, target_pos):
         """Shoots into given direction."""
-        emitted_cells = player.shoot(angle)
+        emitted_cells = player.shoot(target_pos)
         for cell in emitted_cells:
             self.add_cell(cell)
 
@@ -53,10 +54,10 @@ class Model():
         else:
             logger.debug(f'{player} tried to shoot, but he can\'t')
 
-    def split(self, player, angle):
+    def split(self, player, target_pos):
         """Splits player."""
         self.remove_player(player)
-        new_parts = player.split(angle)
+        new_parts = player.split(target_pos)
         self.add_player(player)
 
         if new_parts:
@@ -95,13 +96,20 @@ class Model():
                 players.extend(chunk.players)
                 cells.extend(chunk.cells)
             
-            # check is player killed some cells
+            # check is player killed some cells (including viruses)
             for cell in cells:
                 killed_cell = player.attempt_murder(cell)
                 if killed_cell:
                     logger.debug(f'{player} ate {killed_cell}')
                     self.remove_cell(killed_cell)
-                    # self.cells.remove(killed_cell)
+                    # If the eaten cell is a virus, split the player into many parts
+                    if isinstance(killed_cell, Virus):
+                        # Explosive split: attempt to create parts in multiple directions
+                        max_new_parts = max(0, 16 - len(player.parts))
+                        if max_new_parts > 0:
+                            for i in range(max_new_parts):
+                                angle = 2 * 3.1415926535 * i / max_new_parts
+                                player.split(angle)
             
             # check is player killed other players or their parts
             for another_player in players:
@@ -121,6 +129,11 @@ class Model():
         """Spawn passed amount of cells on the field."""
         for _ in range(amount):
             self.add_cell(Cell.make_random(self.bounds))
+
+    def spawn_viruses(self, amount):
+        """Spawn a number of viruses on the field."""
+        for _ in range(amount):
+            self.add_cell(Virus.make_random(self.bounds))
 
     def bound_cell(self, cell):
         cell.pos[0] = self.bounds[0] if cell.pos[0] > self.bounds[0] else cell.pos[0]

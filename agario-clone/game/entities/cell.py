@@ -9,11 +9,10 @@ from .circle import Circle
 class Cell(Circle, interfaces.Victim):
     """Represents cell(food) state."""
 
-    BORDER_WIDTH=0
-    FRICTION = 0.1
-    MAX_SPEED = 5
-    SIZES = (5, 7, 10)
-    SIZES_CUM = (70, 20, 10)
+    BORDER_WIDTH = 0
+    FRICTION = 0.05
+    SIZES = (9, 10, 11)
+    SIZES_CUM = (20, 70, 10)
 
     def __init__(self, pos, radius, color, angle=0, speed=0):
         super().__init__(pos, radius)
@@ -29,6 +28,8 @@ class Cell(Circle, interfaces.Victim):
         self.speed -= self.FRICTION
         if self.speed < 0:
             self.speed = 0
+        # Max speed affected by size with this formula: speed = (mass / mass^1.44) * 10
+        self.MAX_SPEED = (self.mass() / self.mass()**1.44) * 10
         # get cartesian vector
         diff_xy = gu.polar_to_cartesian(self.angle, self.speed*self.MAX_SPEED)
         # change position
@@ -52,10 +53,16 @@ class Cell(Circle, interfaces.Victim):
 
     def try_to_kill_by(self, killer):
         """Check is killer cell could eat current cell."""
-        if 2*self.area() <= killer.area() and \
-                self.distance_to(killer) <= killer.radius - self.radius:
+        # Must be ~82% mass of killer to be eaten
+        if self.mass() < killer.mass() * 0.82 and self.distance_to(killer) <= killer.radius - self.radius:
             return self
         return None
+
+    def mass(self):
+        """Returns the mass of this cell."""
+        # agar.io stats from https://gamefaqs.gamespot.com/webonly/163063-agario/faqs/73510
+        # mass = size^2 / 100
+        return (self.radius * self.radius) / 100
 
     @classmethod
     def make_random(cls, bounds):

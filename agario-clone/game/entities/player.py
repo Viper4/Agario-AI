@@ -11,7 +11,7 @@ from .circle import Circle
 class Player(interfaces.Victim, interfaces.Killer):
     """Class that represents player game state."""
 
-    START_SIZE = 40
+    START_SIZE = 31.62  # Starting mass in agar.io is 10 and mass = size^2 / 100
     BORDER_WIDTH = 5
 
     LAST_ID = -1
@@ -67,6 +67,8 @@ class Player(interfaces.Victim, interfaces.Killer):
     def split(self, angle):
         new_parts = list()
         for cell in self.parts:
+            if len(self.parts) + len(new_parts) >= 16:
+                break
             if cell.able_to_split():
                 new_parts.append(cell.split(angle))
 

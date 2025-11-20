@@ -59,11 +59,11 @@ class UDPHandler(socketserver.BaseRequestHandler):
                 if key == pygame.K_w:
                     model.shoot(
                         player,
-                        mouse_pos[0])
+                        mouse_pos)
                 elif key == pygame.K_SPACE:
                     model.split(
                         player,
-                        mouse_pos[0])
+                        mouse_pos)
             # update player velocity and update model state
             model.update_velocity(player, *mouse_pos)
             model.update()

@@ -49,7 +49,7 @@ class View():
         self.player = player
         self.debug = debug
         self.camera = Camera(0, 0, self.width, self.height)
-        self.fps = 30
+        self.fps = 60
         self.clock = pygame.time.Clock()
         self.screen = pygame.display.set_mode((self.width, self.height))
         self.hud_surface = pygame.Surface((1, 1), pygame.SRCALPHA)
