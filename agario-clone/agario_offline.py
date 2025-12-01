@@ -5,21 +5,30 @@ import threading
 
 from game.view import View
 from game.model import Model
-from game.entities import Player
-from game.entities import Virus
+from game.entities import Player, Virus, PlayerCell
 
 
 def game_loop(food_count: int, virus_count: int, model: Model):
     while True:
         cells = model.cells
-        # Maintain food (non-virus) count
-        food_cells = [c for c in cells if not isinstance(c, Virus)]
-        if len(food_cells) < food_count:
-            model.spawn_cells(food_count - len(food_cells))
+        num_viruses = 0
+        num_players = 0
+        num_food = 0
+        for cell in cells:
+            if isinstance(cell, Virus):
+                num_viruses += 1
+            elif isinstance(cell, PlayerCell):
+                num_players += 1
+            else:
+                num_food += 1
+
         # Maintain virus count
-        virus_cells = [c for c in cells if isinstance(c, Virus)]
-        if len(virus_cells) < virus_count:
-            model.spawn_viruses(virus_count - len(virus_cells))
+        if num_viruses < virus_count:
+            model.spawn_viruses(virus_count - num_viruses)
+
+        # Maintain food count
+        if num_food < food_count:
+            model.spawn_cells(food_count - num_food)
         time.sleep(0.25)
 
 

@@ -134,6 +134,55 @@ class ImageProcessing:
 
         return objects
 
+    @staticmethod
+    def cluster_or_add(obj: geometry_utils.GameObject, objects: list[geometry_utils.GameObject], label: str, max_count: int, cluster_by: str, cluster_distance: float):
+        """
+        Cluster 'obj' with any nearby cluster of the same type or add it to 'objects' if no clusters found
+        :param obj: object to cluster or add to objects
+        :param objects: all possible GOs to cluster with
+        :param label: type to cluster with
+        :param max_count: maximum number of objects in a cluster
+        :param cluster_by: cluster by distance between "center" or "edge"
+        :param cluster_distance: maximum distance to cluster by
+        :return:
+        """
+        if max_count > 1:
+            # Try merging this object with any nearby cluster
+            for other_obj in objects:
+                if other_obj.count >= max_count:
+                    continue
+                if other_obj.label != label:
+                    continue
+
+                # Cluster by center by default
+                dx = obj.pos.x - other_obj.pos.x
+                dy = obj.pos.y - other_obj.pos.y
+                if cluster_by == "edge":
+                    # Cluster by distance between closest edges of bounding boxes
+                    dx, dy = obj.linear_bounds_distance(other_obj.bounding_box)
+
+                if dx * dx + dy * dy < cluster_distance * cluster_distance:
+                    # Update position as weighted average by area
+                    # (x, y) = (A1x1 + A2x2) / (A1+A2), (A1y1 + A2y2) / (A1+A2)
+                    total_area = other_obj.area + obj.area
+                    other_obj.pos = geometry_utils.Vector(
+                        int((other_obj.area * other_obj.pos.x + obj.area * obj.pos.x) / total_area),
+                        int((other_obj.area * other_obj.pos.y + obj.area * obj.pos.y) / total_area))
+
+                    other_obj.area = total_area
+                    other_obj.perimeter += obj.perimeter
+                    other_obj.count += 1
+                    other_obj.circularity = (other_obj.circularity + obj.circularity) / 2
+                    other_obj.extend_bounds(obj.bounding_box)
+                    break
+                # No need to append this obj to objects list since we merged it with other_obj
+            else:
+                # No clusters found so add to objects list
+                objects.append(obj)
+        else:
+            # Don't waste time making clusters of 1 object
+            objects.append(obj)
+
     def parse_contours_to_objects(self, img: cv2.Mat, label: str, verbose: bool):
         """
         Extracts objects from the image using contour detection
@@ -148,7 +197,6 @@ class ImageProcessing:
         cluster_by = settings.get("cluster_by", "center")
         max_count = settings.get("max_count", 1)
         cluster_distance = settings.get("cluster_distance", 0)
-        cluster_distance_sq = cluster_distance * cluster_distance
         variants = settings.get("variants", None)
 
         img_center_x = img.shape[1] / 2
@@ -177,14 +225,13 @@ class ImageProcessing:
 
             if variants is not None:
                 if identify_by == "perimeter":
-                    # Check variants for matching perimeter
+                    # Check variants for matching perimeter, this is used later to cluster objects of the same type
                     for key, value in variants.items():
                         if value["min_perimeter"] < perimeter < value["max_perimeter"]:
                             label = key
                             cluster_by = value.get("cluster_by", cluster_by)
                             max_count = value.get("max_count", max_count)
                             cluster_distance = value.get("cluster_distance", cluster_distance)
-                            cluster_distance_sq = cluster_distance * cluster_distance
                             break
 
             obj = geometry_utils.GameObject(label=label,
@@ -195,40 +242,7 @@ class ImageProcessing:
                                             count=1,
                                             bounding_box=(geometry_utils.Vector(x, y), geometry_utils.Vector(x + w, y + h)))
 
-            # Clustering
-            if max_count > 1:
-                # Try merging this object with any nearby cluster
-                for other_obj in objects:
-                    if other_obj.count >= max_count:
-                        continue
-                    if other_obj.label != label:
-                        continue
-
-                    # Cluster by center by default
-                    dx = obj.pos.x - other_obj.pos.x
-                    dy = obj.pos.y - other_obj.pos.y
-                    if cluster_by == "edge":
-                        # Cluster by distance between closest edges of bounding boxes
-                        dx, dy = obj.linear_bounds_distance(other_obj.bounding_box)
-
-                    if dx * dx + dy * dy < cluster_distance_sq:
-                        # Update position as weighted average by area
-                        # (x, y) = (A1x1 + A2x2) / (A1+A2), (A1y1 + A2y2) / (A1+A2)
-                        total_area = other_obj.area + obj.area
-                        other_obj.pos = geometry_utils.Vector(
-                            int((other_obj.area * other_obj.pos.x + obj.area * obj.pos.x) / total_area),
-                            int((other_obj.area * other_obj.pos.y + obj.area * obj.pos.y) / total_area))
-
-                        other_obj.area = total_area
-                        other_obj.perimeter += obj.perimeter
-                        other_obj.count += 1
-                        other_obj.circularity = (other_obj.circularity + obj.circularity) / 2
-                        other_obj.extend_bounds(obj.bounding_box)
-                        break
-                else:
-                    objects.append(obj)
-            else:
-                objects.append(obj)
+            self.cluster_or_add(obj, objects, label, max_count, cluster_by, cluster_distance)
         return objects
 
     def show_visual(self, save_to_file: bool):

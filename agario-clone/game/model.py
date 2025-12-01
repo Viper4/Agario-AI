@@ -1,10 +1,10 @@
 import itertools
 import time
+import random
 
 from loguru import logger
 
-from .entities import Cell
-from .entities import Virus
+from .entities import Cell, Virus, PlayerCell
 
 
 class Model():
@@ -102,13 +102,13 @@ class Model():
                 if killed_cell:
                     if isinstance(killed_cell, Virus):
                         # Explode the killer cell
-                        print("Hit virus here")
                         new_parts = player.MAX_PARTS - len(player.parts)
                         for i in range(new_parts):
                             if not killer_cell.able_to_split():
                                 break
                             angle = 2 * 3.1415926535 * i / player.MAX_PARTS
                             player.parts.append(killer_cell.split(angle))
+                            #player.parts.append(killer_cell.emit(angle, 1.0, 10.0, PlayerCell))
 
                     logger.debug(f'{player} ate {killed_cell}')
                     self.remove_cell(killed_cell)

@@ -95,7 +95,7 @@ class Player(interfaces.Victim, interfaces.Killer):
 
     def attempt_murder(self, victim):
         """Try to kill passed victim by player parts. 
-        Returns killed Cell if can and the part that killed it, otherwise return None.
+        Returns killed Cell if can and the cell part that killed it, otherwise return None.
         """
         for cell in self.parts:
             killed_cell = victim.try_to_kill_by(cell)
