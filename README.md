@@ -39,3 +39,7 @@ Install requirements:
 
 Example of object recognition while web crawling on [agar.io](https://en.wikipedia.org/wiki/Agar.io)
 ![processed_image.png](processed_image.png)
+
+## Acknowledgements
+
+The agario clone game was modified from https://github.com/alexandr-gnrk/agario

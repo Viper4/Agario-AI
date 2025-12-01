@@ -75,6 +75,31 @@ class Player(interfaces.Victim, interfaces.Killer):
         self.parts.extend(new_parts)
         return new_parts
 
+    def explode(self, hit_cell):
+        """
+        Explode the hit_cell into 1 big split and 15 small splits (from eating a virus)
+        :param hit_cell:
+        :return:
+        """
+        max_new_parts = self.MAX_PARTS - len(self.parts)
+
+        if max_new_parts <= 0:
+            return
+
+        # Make the big split first
+        self.parts.append(hit_cell.split(0))
+        max_new_parts -= 1
+
+        # Make the remaining smaller splits
+        for i in range(max_new_parts):
+            if not hit_cell.able_to_split():
+                break
+            angle = 2 * 3.1415926535 * i / self.MAX_PARTS
+
+            new_cell = hit_cell.emit(angle, hit_cell.SPLITCELL_SPEED, hit_cell.SPLITCELL_COND_RADIUS, PlayerCell)
+            new_cell.split_timeout /= 2
+            self.parts.append(new_cell)
+
     def center(self):
         """Returns median position of all player cells."""
         xsum = sum((cell.pos[0] for cell in self.parts))

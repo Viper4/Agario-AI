@@ -77,9 +77,7 @@ class PlayerCell(Cell, interfaces.Killer):
 
     def able_to_emit(self, cond_radius):
         """Checks if cell able to emmit."""
-        if self.radius >= cond_radius:
-            return True
-        return False
+        return self.radius >= cond_radius
 
     def emit(self, angle, speed, radius, ObjClass):
         """Emit cell with given angle and emit type.

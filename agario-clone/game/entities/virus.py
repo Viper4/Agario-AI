@@ -15,7 +15,7 @@ class Virus(Cell):
     FRICTION = 0.0  # Viruses don't move by themselves once placed
     MAX_SPEED = 0
     # Typical virus size range
-    SIZES = (35, 36, 37)
+    SIZES = (40, 41, 42)
     SIZES_CUM = (30, 50, 20)
 
     DEFAULT_COLOR = (80, 200, 120)

@@ -248,6 +248,6 @@ class RNNAgent(BaseAgent):
 
 
 class ModelBasedReflexAgent(BaseAgent):
-    def __init__(self, run_interval, fitness_weights):
+    def __init__(self, run_interval: float, fitness_weights: FitnessWeights):
         super().__init__(run_interval, fitness_weights)
 

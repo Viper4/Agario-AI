@@ -39,7 +39,7 @@ class GameObject:
         self.perimeter = perimeter
         self.circularity = circularity
         self.count = count
-        self.bounding_box = bounding_box  # First pair is top left corner, second pair is bottom right: ((x1, y1), (x2, y2))
+        self.bounding_box = bounding_box  # First vector is top left corner, second vector is bottom right: ((x1, y1), (x2, y2))
 
     def extend_bounds(self, other_bounding_box: tuple[Vector, Vector]):
         """
@@ -49,7 +49,7 @@ class GameObject:
         self.bounding_box = (Vector(min(self.bounding_box[0].x, other_bounding_box[0].x), min(self.bounding_box[0].y, other_bounding_box[0].y)),
                              Vector(max(self.bounding_box[1].x, other_bounding_box[1].x), max(self.bounding_box[1].y, other_bounding_box[1].y)))
 
-    def linear_bounds_distance(self, other_bounding_box):
+    def linear_bounds_distance(self, other_bounding_box: tuple[Vector, Vector]):
         """
         Calculate the distance between the closest edges of this bounding box and the given bounding box
         :param other_bounding_box: (Vector, Vector)
