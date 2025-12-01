@@ -16,6 +16,8 @@ class Player(interfaces.Victim, interfaces.Killer):
 
     LAST_ID = -1
 
+    MAX_PARTS = 16
+
     def __init__(self, nick, player_cell):
         self.id = self.new_id()
         self.nick = nick
@@ -29,15 +31,13 @@ class Player(interfaces.Victim, interfaces.Killer):
             cell.move()
             for another_cell in self.parts[i + 1:]:
                 # cells shoud intersects and not be the same
-                if cell == another_cell or \
-                        not cell.is_intersects(another_cell):
+                if cell == another_cell or not cell.is_intersects(another_cell):
                     continue
 
                 # merge cells if their timeout is zero
                 # otherwise get rid off colission between them
-                if cell.split_timeout == 0 and \
-                        another_cell.split_timeout == 0:
-                    cell.eat(another_cell)
+                if cell.split_timeout == 0 and another_cell.split_timeout == 0:
+                    cell.eat(another_cell, len(self.parts), self.MAX_PARTS)
                     self.parts.remove(another_cell)
                 else:
                     cell.regurgitate_from(another_cell)
@@ -67,7 +67,7 @@ class Player(interfaces.Victim, interfaces.Killer):
     def split(self, angle):
         new_parts = list()
         for cell in self.parts:
-            if len(self.parts) + len(new_parts) >= 16:
+            if len(self.parts) + len(new_parts) >= self.MAX_PARTS:
                 break
             if cell.able_to_split():
                 new_parts.append(cell.split(angle))
@@ -95,15 +95,15 @@ class Player(interfaces.Victim, interfaces.Killer):
 
     def attempt_murder(self, victim):
         """Try to kill passed victim by player parts. 
-        Returns killed Cell if can, otherwise return None.
+        Returns killed Cell if can and the part that killed it, otherwise return None.
         """
         for cell in self.parts:
             killed_cell = victim.try_to_kill_by(cell)
             if killed_cell:
                 # feed player cell with killed cell
-                cell.eat(killed_cell)
-                return killed_cell
-        return None
+                cell.eat(killed_cell, len(self.parts), self.MAX_PARTS)
+                return killed_cell, cell
+        return None, None
 
     def try_to_kill_by(self, killer):
         """Check is killer cell could eat some of player parts.

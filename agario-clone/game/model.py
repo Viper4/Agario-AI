@@ -98,18 +98,20 @@ class Model():
             
             # check is player killed some cells (including viruses)
             for cell in cells:
-                killed_cell = player.attempt_murder(cell)
+                killed_cell, killer_cell = player.attempt_murder(cell)
                 if killed_cell:
+                    if isinstance(killed_cell, Virus):
+                        # Explode the killer cell
+                        print("Hit virus here")
+                        new_parts = player.MAX_PARTS - len(player.parts)
+                        for i in range(new_parts):
+                            if not killer_cell.able_to_split():
+                                break
+                            angle = 2 * 3.1415926535 * i / player.MAX_PARTS
+                            player.parts.append(killer_cell.split(angle))
+
                     logger.debug(f'{player} ate {killed_cell}')
                     self.remove_cell(killed_cell)
-                    # If the eaten cell is a virus, split the player into many parts
-                    if isinstance(killed_cell, Virus):
-                        # Explosive split: attempt to create parts in multiple directions
-                        max_new_parts = max(0, 16 - len(player.parts))
-                        if max_new_parts > 0:
-                            for i in range(max_new_parts):
-                                angle = 2 * 3.1415926535 * i / max_new_parts
-                                player.split(angle)
             
             # check is player killed other players or their parts
             for another_player in players:

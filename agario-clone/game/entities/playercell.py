@@ -5,6 +5,7 @@ from operator import add, sub
 from .. import gameutils as gu
 from . import interfaces
 from .cell import Cell
+from .virus import Virus
 
 
 class PlayerCell(Cell, interfaces.Killer):
@@ -39,11 +40,15 @@ class PlayerCell(Cell, interfaces.Killer):
         self.__add_area(self.__area_pool_give_out())
         super().move()
 
-    def eat(self, cell):
+    def eat(self, cell, num_parts, max_parts):
         """Increase current cell area with passed cell area,
         by changing cell area.
         """
-        self.area_pool += cell.area()
+        if isinstance(cell, Virus) and num_parts < max_parts:
+            # Add less of virus area to pool
+            self.area_pool += cell.area() * 0.5
+        else:
+            self.area_pool += cell.area()
         self.__add_area(self.__area_pool_give_out())
 
     def __split_timeout_tick(self):
