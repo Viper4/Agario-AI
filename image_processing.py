@@ -240,7 +240,8 @@ class ImageProcessing:
                                             area=area,
                                             circularity=circularity,
                                             count=1,
-                                            bounding_box=(geometry_utils.Vector(x, y), geometry_utils.Vector(x + w, y + h)))
+                                            bounding_box=(
+                                                geometry_utils.Vector(x, y), geometry_utils.Vector(x + w, y + h)))
 
             self.cluster_or_add(obj, objects, label, max_count, cluster_by, cluster_distance)
         return objects

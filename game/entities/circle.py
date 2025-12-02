@@ -1,8 +1,6 @@
 import math
 from operator import sub
 
-from .. import gameutils as gu
-
 
 class Circle():
     """Class that describes circle figure."""

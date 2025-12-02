@@ -21,6 +21,18 @@ class Vector:
         magnitude = self.magnitude()
         return Vector(self.x / magnitude, self.y / magnitude)
 
+    def __add__(self, other):
+        return Vector(self.x + other.x, self.y + other.y)
+
+    def __sub__(self, other):
+        return Vector(self.x - other.x, self.y - other.y)
+
+    def __mul__(self, other):
+        return Vector(self.x * other.x, self.y * other.y)
+
+    def __truediv__(self, other):
+        return Vector(self.x / other.x, self.y / other.y)
+
     def __str__(self):
         return f"({self.x}, {self.y})"
 
@@ -80,6 +92,20 @@ class GameObject:
 
     def copy(self):
         return GameObject(self.label, self.pos, self.area, self.perimeter, self.circularity, self.count, self.bounding_box)
+
+    def check_visible(self, bounds: tuple[Vector, Vector]):
+        """
+        Checks whether this object is visible within the given bounds
+        :param bounds: (Vector, Vector) where first vector is top left corner and second vector is bottom right corner
+        :return: bool
+        """
+        to_right = self.bounding_box[1].x > bounds[0].x  # Bottom right corner is to the right of left edge of view
+        to_left = self.bounding_box[0].x < bounds[1].x  # Top left corner is to the left of right edge of view
+
+        below = self.bounding_box[1].y < bounds[0].y  # Bottom right corner is below the top edge of view
+        above = self.bounding_box[0].y > bounds[1].y  # Top left corner is above the bottom edge of view
+
+        return to_right and to_left and below and above
 
     def __str__(self):
         return f"{self.label}: ({self.pos.x}, {self.pos.y})"

@@ -1,10 +1,9 @@
 import itertools
 import time
-import random
 
 from loguru import logger
 
-from .entities import Cell, Virus, PlayerCell
+from .entities import Cell, Virus
 
 
 class Model():
@@ -49,10 +48,10 @@ class Model():
         for cell in emitted_cells:
             self.add_cell(cell)
 
-        if emitted_cells:
-            logger.debug(f'{player} shot')
-        else:
-            logger.debug(f'{player} tried to shoot, but he can\'t')
+        #if emitted_cells:
+        #    logger.debug(f'{player} shot')
+        #else:
+        #    logger.debug(f'{player} tried to shoot, but he can\'t')
 
     def split(self, player, target_pos):
         """Splits player."""
@@ -60,15 +59,15 @@ class Model():
         new_parts = player.split(target_pos)
         self.add_player(player)
 
-        if new_parts:
-            logger.debug(f'{player} splitted')
-        else:
-            logger.debug(f'{player} tried to split, but he can\'t')
+        #if new_parts:
+        #    logger.debug(f'{player} splitted')
+        #else:
+        #    logger.debug(f'{player} tried to split, but he can\'t')
 
     def update(self):
         """Updates game state."""
         if time.time() - self.round_start >= self.ROUND_DURATION:
-            logger.debug('New round was started.')
+            #logger.debug('New round was started.')
             self.__reset_players()
             self.round_start = time.time()
 
@@ -102,7 +101,7 @@ class Model():
                 if killed_cell:
                     if isinstance(killed_cell, Virus):
                         player.explode(killer_cell)
-                    logger.debug(f'{player} ate {killed_cell}')
+                    #logger.debug(f'{player} ate {killed_cell}')
                     self.remove_cell(killed_cell)
             
             # check is player killed other players or their parts
@@ -147,7 +146,10 @@ class Model():
         self.__pos_to_chunk(cell.pos).cells.append(cell)
 
     def remove_player(self, player):
-        self.__pos_to_chunk(player.center()).players.remove(player)
+        try:
+            self.__pos_to_chunk(player.center()).players.remove(player)
+        except ValueError:
+            pass
 
     def remove_cell(self, cell):
         self.__pos_to_chunk(cell.pos).cells.remove(cell)

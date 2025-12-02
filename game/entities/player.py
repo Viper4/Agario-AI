@@ -5,7 +5,6 @@ import math
 from .. import gameutils as gu
 from . import interfaces
 from .playercell import PlayerCell
-from .circle import Circle
 
 
 class Player(interfaces.Victim, interfaces.Killer):
@@ -55,18 +54,22 @@ class Player(interfaces.Victim, interfaces.Killer):
             # update velocity of cell
             cell.update_velocity(*rel_vel)
 
-    def shoot(self, angle):
-        """Shoots with cells to given direction."""
+    def shoot(self, target_pos):
+        """Shoots with cells towards target_pos."""
         emmited = list()
         for cell in self.parts:
+            direction = (target_pos[0] - cell.pos[0], target_pos[1] - cell.pos[1])
+            angle = math.atan2(direction[1], direction[0])
             if cell.able_to_shoot():
                 emmited.append(cell.shoot(angle))
 
         return emmited
 
-    def split(self, angle):
+    def split(self, target_pos):
         new_parts = list()
         for cell in self.parts:
+            direction = (target_pos[0] - cell.pos[0], target_pos[1] - cell.pos[1])
+            angle = math.atan2(direction[1], direction[0])
             if len(self.parts) + len(new_parts) >= self.MAX_PARTS:
                 break
             if cell.able_to_split():

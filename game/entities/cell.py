@@ -2,11 +2,11 @@ import random
 from operator import add, sub
 
 from .. import gameutils as gu
-from . import interfaces
+from .interfaces import Victim
 from .circle import Circle
 
 
-class Cell(Circle, interfaces.Victim):
+class Cell(Circle, Victim):
     """Represents cell(food) state."""
 
     BORDER_WIDTH = 0

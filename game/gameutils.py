@@ -3,13 +3,13 @@ import random
 from operator import add, sub
 
 
-def polar_to_cartesian(angle, val):
+def polar_to_cartesian(angle, length):
     """Converts polar coord to cartesian."""
-    return [val * math.cos(angle), val * math.sin(angle)]
+    return [length * math.cos(angle), length * math.sin(angle)]
 
 
 def cartesian_to_polar(x, y):
-    """Converts cartesian coord to polar."""
+    """Converts cartesian coord to polar (angle, length)."""
     return [math.atan2(y, x), math.sqrt(x**2 + y**2)]
 
 
@@ -41,7 +41,7 @@ def random_pos(size):
 
 
 def velocity_relative_to_pos(vec_pos, angle, speed, pos):
-    """Returns new velocity that points in pos."""
+    """Returns new velocity that points to given pos."""
     # get catesian vector
     vec = polar_to_cartesian(angle, speed*500)
     # get vector end position

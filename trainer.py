@@ -5,14 +5,7 @@ from agent import Hyperparameters, FitnessWeights
 from multiprocessing import Pool
 from tqdm import tqdm
 import time
-
-
-class ModelBasedReflexTrainer:
-    def __init__(self):
-        pass
-
-    def run(self):
-        pass
+import random
 
 
 class GeneticTrainer:
@@ -59,16 +52,6 @@ class GeneticTrainer:
                     torch.where(mask, param1.data, param2.data)
                 )
 
-            # Also crossover the fully connected layer
-            for (param1, param2, param_child) in zip(
-                    parent1.fc.parameters(),
-                    parent2.fc.parameters(),
-                    child.fc.parameters()):
-                mask = torch.rand_like(param1) < 0.5
-                param_child.data.copy_(
-                    torch.where(mask, param1.data, param2.data)
-                )
-
             child.mutate()
             child.reduce_sigma(0.9)  # Reduce mutation strength
             children.append(child)
@@ -82,7 +65,7 @@ class GeneticTrainer:
         generation = 0
         self.init_agents()
         while self.max_generations is None or generation < self.max_generations:
-            # Run agent games in parallel
+            # Run 5 simulations in parallel
             pool = Pool()
             jobs = []
             for i in range(self.population_size):
@@ -127,8 +110,13 @@ class GeneticTrainer:
                 # Cutoff the bottom
                 new_population = new_population[:self.population_size]
             elif diff > 0:  # Not enough children
-                # Add the best agents from the previous generation
-                new_population.extend(self.population[-diff:])
+                # Reproduce random parents from top half
+                for i in range(diff):
+                    # Small chance to pick the same parent twice, so cloning is sometimes possible
+                    parent1 = random.choice(self.population[:self.population_size//2])
+                    parent2 = random.choice(self.population[:self.population_size//2])
+                    children = self.reproduce(parent1, parent2, 1)
+                    new_population.extend(children)
 
             self.population = new_population
             generation += 1
@@ -137,16 +125,18 @@ class GeneticTrainer:
 
 if __name__ == "__main__":
     # Max number of objects on screen at a time reaches ~50 so define fixed input of 32 objects with 8 nodes per object
-    hyperparameters = Hyperparameters(input_size=256, hidden_size=32, output_size=4,
+    hyperparameters = Hyperparameters(input_size=256,
+                                      hidden_layers=[32, 16],
+                                      output_size=4,
                                       run_interval=0.2,
-                                      param_mutations={"weight": 0.2, "bias": 0.1})
+                                      param_mutations={"weight": 0.5, "bias": 0.25},
+                                      move_sensitivity=2.5)
     fitness_weights = FitnessWeights(food=0.75, time_alive=0.5, cells_eaten=2.0, highest_mass=1.5)
 
     command = input("Enter command> ")
     if command == "train":
         if input("Select trainer (0=Model Based, 1=Genetic)> ") == "0":
-            trainer = ModelBasedReflexTrainer()
-            #trainer.train()
+            pass
         else:
             trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
                                      hyperparameters=hyperparameters,

@@ -1,23 +1,21 @@
-import os.path
-import sys
 import time
 import threading
+
+import geometry_utils
 from image_processing import ImageProcessing
 from web_scraper import WebScraper
 import random
 import torch
-import numpy as np
 
 
 class Hyperparameters:
-    def __init__(self, input_size: int, hidden_size: int, output_size: int,
-                 run_interval: float, param_mutations: dict):
+    def __init__(self, input_size: int, hidden_layers: list[int], output_size: int, run_interval: float, param_mutations: dict, move_sensitivity: float):
         self.input_size = input_size
-        self.hidden_size = hidden_size
+        self.hidden_layers = hidden_layers  # Defines number of hidden nodes at layer i
         self.output_size = output_size
-        self.run_interval = run_interval
-        self.param_mutations = param_mutations
-
+        self.run_interval = run_interval  # Time between actions in seconds
+        self.param_mutations = param_mutations  # Dict holding param mutation standard deviations Ex: {"weight": 0.5, "bias": 0.1}
+        self.move_sensitivity = move_sensitivity  # Factor to multiply the move output vector by
 
 class FitnessWeights:
     def __init__(self, food: float, time_alive: float, cells_eaten: float, highest_mass: float):
@@ -28,7 +26,7 @@ class FitnessWeights:
 
 
 class BaseAgent(threading.Thread):
-    def __init__(self, run_interval: float, fitness_weights: FitnessWeights):
+    def __init__(self, run_interval: float, fitness_weights: FitnessWeights | None):
         super().__init__()
         self.run_interval = run_interval
         self.program_running = True
@@ -97,24 +95,129 @@ class BaseAgent(threading.Thread):
             time.sleep(self.run_interval)
 
 
+class CustomRNN(torch.nn.Module):
+    def __init__(self, input_size: int, hidden_sizes: list[int], output_size: int, device: torch.device):
+        """
+        hidden_sizes: list like [16, 32, 20] meaning:
+            layer 0: 16 hidden units
+            layer 1: 32 hidden units
+            layer 2: 20 hidden units
+        """
+        super().__init__()
+
+        self.num_layers = len(hidden_sizes)
+        self.hidden_sizes = hidden_sizes
+        self.device = device
+
+        # Create RNNCell for each layer
+        self.cells = torch.nn.ModuleList()
+
+        for i, h in enumerate(hidden_sizes):
+            inp = input_size if i == 0 else hidden_sizes[i - 1]
+            self.cells.append(torch.nn.RNNCell(inp, h))
+
+        # Final linear output layer
+        self.fc = torch.nn.Linear(hidden_sizes[-1], output_size)
+
+    def forward(self, x, h=None):
+        """
+        x: (batch, seq_len, input_size)
+        h: list of hidden states for each layer (optional)
+        """
+        batch, seq_len, _ = x.size()
+
+        # Initialize hidden states if not provided
+        if h is None:
+            h = [
+                torch.zeros(batch, hs, device=self.device)
+                for hs in self.hidden_sizes
+            ]
+
+        inp = x[:, 0]
+        # Process sequence
+        for t in range(seq_len):
+            inp = x[:, t]
+
+            # Pass through each layer manually
+            for layer in range(self.num_layers):
+                h[layer] = self.cells[layer](inp, h[layer])
+                inp = h[layer]  # output of current layer is input to next
+
+        # Output from final layer goes to output head
+        out = self.fc(inp)
+        return out, h
+
+
+class CustomLSTM(torch.nn.Module):
+    def __init__(self, input_size: int, hidden_sizes: list[int], output_size: int, device: torch.device):
+        """
+        hidden_sizes: list like [16, 32, 20] meaning:
+            layer 0: 16 hidden units
+            layer 1: 32 hidden units
+            layer 2: 20 hidden units
+        """
+        super().__init__()
+
+        self.num_layers = len(hidden_sizes)
+        self.hidden_sizes = hidden_sizes
+        self.device = device
+
+        # Create RNNCell for each layer
+        self.cells = torch.nn.ModuleList()
+
+        for i, h in enumerate(hidden_sizes):
+            inp = input_size if i == 0 else hidden_sizes[i - 1]
+            self.cells.append(torch.nn.LSTMCell(inp, h))
+
+        # Final linear output layer
+        self.fc = torch.nn.Linear(hidden_sizes[-1], output_size)
+
+    def forward(self, x, h=None):
+        """
+        x: (batch, seq_len, input_size)
+        h: list of hidden states for each layer (optional)
+        """
+        batch, seq_len, _ = x.size()
+
+        # Initialize hidden states if not provided
+        if h is None:
+            h = [
+                torch.zeros(batch, hs, device=self.device)
+                for hs in self.hidden_sizes
+            ]
+
+        inp = x[:, 0]
+        # Process sequence
+        for t in range(seq_len):
+            inp = x[:, t]
+
+            # Pass through each layer manually
+            for layer in range(self.num_layers):
+                h[layer] = self.cells[layer](inp, h[layer])
+                inp = h[layer]  # output of current layer is input to next
+
+        # Output from final layer goes to output head
+        out = self.fc(inp)
+        return out, h
+
+
 class RNNAgent(BaseAgent):
-    def __init__(self, hyperparameters: Hyperparameters, fitness_weights: FitnessWeights, randomize_params: bool, device: torch.device):
+    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
         super().__init__(hyperparameters.run_interval, fitness_weights)
         self.hyperparameters = hyperparameters
         self.device = device
 
-        # Initialize hidden state to all 0s
-        self.hidden = torch.zeros(1, hyperparameters.input_size, hyperparameters.hidden_size).to(self.device)
-
-        # Set up the recurrent neural network
-        self.rnn = torch.nn.RNN(hyperparameters.input_size, hyperparameters.hidden_size, hyperparameters.output_size, nonlinearity="tanh")
-        self.fc = torch.nn.Linear(hyperparameters.hidden_size, hyperparameters.output_size)  # Fully connected layer
+        if hyperparameters is None:
+            self.load_agent("agent.pth")
+        else:
+            self.rnn = CustomRNN(hyperparameters.input_size, hyperparameters.hidden_layers, hyperparameters.output_size, self.device)
+        self.hidden = None  # Hidden states for each layer (memory)
 
         # Randomize the parameters if specified
         if randomize_params:
-            for name, param in (list(self.rnn.named_parameters()) + list(self.fc.named_parameters())):
+            for name, param in list(self.rnn.named_parameters()):
                 sigma = 0
-                # Find the mutation hyperparam(s) associated with this parameter
+                # Find the mutation hyperparam associated with this parameter
                 for key, value in hyperparameters.param_mutations:
                     if key in name:
                         sigma = value
@@ -125,28 +228,26 @@ class RNNAgent(BaseAgent):
 
     def forward(self, x):
         """
-        Feeds the input through the network
+        Feeds the input through the network and updates hidden states
         :param x: input to the network
         :return: network's output
         """
-        output, h = self.rnn(x, self.hidden)
+        output, h = self.rnn.forward(x, self.hidden)
         self.hidden = h
-
-        output = self.fc(output[:, -1, :])  # Get the last output layer
         return output
 
     def save_agent(self):
         """
-        Saves this agent's data to a file
+        Saves this agent's hyperparameters and RNN to a file
         """
-        torch.save((self.hyperparameters, self.rnn, self.fc), "agent.pth")
+        torch.save((self.hyperparameters, self.rnn), "agent.pth")
 
     def load_agent(self, path: str):
         """
-        Loads hyperparameters, RNN, and FC layer from the given path
+        Loads hyperparameters, and RNN from the given path
         :param path: str
         """
-        self.hyperparameters, self.rnn, self.fc = torch.load(path)
+        self.hyperparameters, self.rnn = torch.load(path)
 
     def reduce_sigma(self, factor: float):
         """
@@ -160,7 +261,7 @@ class RNNAgent(BaseAgent):
         """
         Mutates this agent's model parameters with normal distribution perturbations
         """
-        for name, param in (list(self.rnn.named_parameters()) + list(self.fc.named_parameters())):
+        for name, param in list(self.rnn.named_parameters()):
             sigma = 0
             # Find the mutation hyperparam(s) associated with this parameter
             for key, value in self.hyperparameters.param_mutations:
@@ -171,15 +272,47 @@ class RNNAgent(BaseAgent):
             noise = torch.randn_like(param) * sigma  # Gaussian noise
             param.data.add_(noise)
 
-    def run_training_loop(self):
+    def get_action(self, objects: list[geometry_utils.GameObject]):
         """
-        Runs the training loop for this agent using the custom agar game environment.
-        :return:
+        Returns the action of the RNN after inputting the visible objects.
+        :param objects: list of GameObjects for input
+        :return: tuple of (move_x, move_y, split, eject)
         """
         max_input_objects = self.hyperparameters.input_size // 8
-        while self.program_running:
-            pass
-        return self.fitness
+
+        # Convert objects list to tensor input for the network
+        x = torch.zeros((1, self.hyperparameters.input_size))
+        # 8 input nodes per object
+        # The 8 nodes are formatted: (food, virus, player, relative pos x, relative pos y, area, perimeter, count)
+        i = 0
+        while i < max_input_objects and i < len(objects):
+            obj = objects[i]
+
+            # Encode label as one-hot
+            nodes = [0, 0, 0,
+                     obj.pos.x,
+                     obj.pos.y,
+                     obj.area,
+                     obj.perimeter,
+                     obj.count]
+            if obj.label == "food":
+                nodes[0] = 1
+            elif obj.label == "player":
+                nodes[1] = 1
+            elif obj.label == "virus":
+                nodes[2] = 1
+
+            # Insert into x tensor
+            start = i * 8
+            end = start + 8
+            x[0, start:end] = torch.tensor(nodes, dtype=torch.float32)
+            i += 1
+
+        # Feed the input through the network
+        output = self.forward(x)
+        # Take action with output: (move x, move y, split, eject)
+        move_x, move_y, split, eject = output[0]
+        return move_x, move_y, split, eject
 
     def run_web_game(self, visualize: bool):
         """
@@ -187,44 +320,14 @@ class RNNAgent(BaseAgent):
         Meant for testing purposes not for training.
         :return: fitness
         """
-        max_input_objects = self.hyperparameters.input_size // 8
         self.start_web_game()
         while self.program_running:
             if self.scraper.in_game():
                 self.alive = True
                 objects = self.get_web_game_data(visualize=visualize)
 
-                # Convert objects list to useable input for the network
-                x = torch.zeros((1, self.hyperparameters.input_size))
-                # 8 input nodes per object
-                # The 8 nodes are formatted: (food, virus, player, pos x, pos y, area, perimeter, count)
-                i = 0
-                while i < max_input_objects and i < len(objects):
-                    obj = objects[i]
+                move_x, move_y, split, eject = self.get_action(objects)
 
-                    # Encode label as one-hot
-                    nodes = [0, 0, 0,
-                             obj.pos.x,
-                             obj.pos.y,
-                             obj.area,
-                             obj.perimeter,
-                             obj.count]
-                    if obj.label == "food":
-                        nodes[0] = 1
-                    elif obj.label == "player":
-                        nodes[1] = 1
-                    elif obj.label == "virus":
-                        nodes[2] = 1
-
-                    # Insert into x tensor
-                    start = i * 8
-                    end = start + 8
-                    x[0, start:end] = torch.tensor(nodes, dtype=torch.float32)
-                    i += 1
-
-                output = self.forward(x)
-                # Take action with output: (move x, move y, split, eject)
-                move_x, move_y, split, eject = output[0]
                 self.scraper.move(move_x, move_y, 1)
                 if split > 0:
                     self.scraper.press_space()

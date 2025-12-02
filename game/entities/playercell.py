@@ -1,5 +1,4 @@
 import math
-import enum 
 from operator import add, sub
 
 from .. import gameutils as gu
@@ -80,7 +79,7 @@ class PlayerCell(Cell, interfaces.Killer):
         return self.radius >= cond_radius
 
     def emit(self, angle, speed, radius, ObjClass):
-        """Emit cell with given angle and emit type.
+        """Emit cell with given angle in degrees and emit type.
         Returns emmited object.
         """
         # create emmited object at pos [0, 0]
@@ -115,7 +114,7 @@ class PlayerCell(Cell, interfaces.Killer):
         return self.able_to_emit(self.SHOOTCELL_COND_RADIUS)
 
     def split(self, angle):
-        """Spit cell in the given angle.
+        """Spit cell in the given angle in degrees.
         Returns the splitted part.
         """
         return self.emit(
