@@ -11,7 +11,7 @@ class Cell(Circle, Victim):
 
     BORDER_WIDTH = 0
     FRICTION = 0.05
-    SIZES = (9, 10, 11)
+    SIZES = (6, 7, 8)
     SIZES_CUM = (20, 70, 10)
 
     def __init__(self, pos, radius, color, angle=0, speed=0):
@@ -22,6 +22,7 @@ class Cell(Circle, Victim):
         self.angle = angle
         # speed coeff from 0.0 to 1.0
         self.speed = speed
+        self.num_food_eaten = 0
 
     def move(self):
         """Move accroding to stored velocity."""
@@ -29,22 +30,25 @@ class Cell(Circle, Victim):
         if self.speed < 0:
             self.speed = 0
         # Max speed affected by size with this formula: speed = (mass / mass^1.44) * 10
-        self.MAX_SPEED = (self.mass() / self.mass()**1.44) * 10
+        MAX_SPEED = (self.mass() / self.mass()**1.44) * 10
         # get cartesian vector
-        diff_xy = gu.polar_to_cartesian(self.angle, self.speed*self.MAX_SPEED)
+        diff_xy = gu.polar_to_cartesian(self.angle, self.speed*MAX_SPEED)
         # change position
         self.pos = list(map(add, self.pos, diff_xy))
 
     def update_velocity(self, angle, speed):
         """Add self velocity vector with passed velocity vector."""
-        # convert to cartesian
         before_speed = self.speed
+
         v1 = gu.polar_to_cartesian(angle, speed)
         v2 = gu.polar_to_cartesian(self.angle, self.speed)
         # adding vectors
         v3 = list(map(add, v1, v2))
         # convert to polar
         self.angle, self.speed = gu.cartesian_to_polar(*v3)
+
+        #self.angle = angle
+        #self.speed = speed
         # normilize speed coeff
         if before_speed <= 1 and self.speed > 1:
             self.speed = 1

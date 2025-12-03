@@ -36,9 +36,9 @@ def main():
     parser = argparse.ArgumentParser(description="Offline Agar.io (no networking)")
     parser.add_argument('-wt', '--width', dest='width', type=int, default=900, help='screen width')
     parser.add_argument('-ht', '--height', dest='height', type=int, default=600, help='screen height')
-    parser.add_argument('-b', '--bounds', dest='bounds', type=int, default=1000, help='half-size of world bounds (world is [-b,b] x [-b,b])')
-    parser.add_argument('-f', '--food', dest='food', type=int, default=500, help='initial food cell count')
-    parser.add_argument('-v', '--viruses', dest='viruses', type=int, default=15, help='initial virus count')
+    parser.add_argument('-b', '--bounds', dest='bounds', type=int, default=1500, help='half-size of world bounds (world is [-b,b] x [-b,b])')
+    parser.add_argument('-f', '--food', dest='food', type=int, default=750, help='initial food cell count')
+    parser.add_argument('-v', '--viruses', dest='viruses', type=int, default=20, help='initial virus count')
     parser.add_argument('-n', '--nick', dest='nick', type=str, default='Player', help='your nickname')
     args = parser.parse_args()
 
@@ -49,8 +49,10 @@ def main():
     bounds = [args.bounds, args.bounds]
 
     # Create player and model
+    players = [Player.make_random(f"Husk {i}", bounds) for i in range(5)]
     player = Player.make_random(args.nick, bounds)
-    model = Model([player], bounds=bounds)
+    players.append(player)
+    model = Model(players, bounds=bounds)
     model.spawn_cells(args.food)
     model.spawn_viruses(args.viruses)
 

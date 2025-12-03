@@ -17,6 +17,7 @@ class Hyperparameters:
         self.param_mutations = param_mutations  # Dict holding param mutation standard deviations Ex: {"weight": 0.5, "bias": 0.1}
         self.move_sensitivity = move_sensitivity  # Factor to multiply the move output vector by
 
+
 class FitnessWeights:
     def __init__(self, food: float, time_alive: float, cells_eaten: float, highest_mass: float):
         self.food = food
@@ -42,6 +43,8 @@ class BaseAgent(threading.Thread):
         """
         Generates random ID for new username and start a game on agar.io
         """
+        self.scraper.connect_to_game()
+
         random_id = random.randint(100, 1000)  # ID for this agent, can use as name in game to differentiate it (maybe)
 
         self.scraper.press_continue(wait=True)
@@ -114,10 +117,10 @@ class CustomRNN(torch.nn.Module):
 
         for i, h in enumerate(hidden_sizes):
             inp = input_size if i == 0 else hidden_sizes[i - 1]
-            self.cells.append(torch.nn.RNNCell(inp, h))
+            self.cells.append(torch.nn.RNNCell(inp, h, device=self.device))
 
         # Final linear output layer
-        self.fc = torch.nn.Linear(hidden_sizes[-1], output_size)
+        self.fc = torch.nn.Linear(hidden_sizes[-1], output_size, device=self.device)
 
     def forward(self, x, h=None):
         """
@@ -132,59 +135,8 @@ class CustomRNN(torch.nn.Module):
                 torch.zeros(batch, hs, device=self.device)
                 for hs in self.hidden_sizes
             ]
-
-        inp = x[:, 0]
-        # Process sequence
-        for t in range(seq_len):
-            inp = x[:, t]
-
-            # Pass through each layer manually
-            for layer in range(self.num_layers):
-                h[layer] = self.cells[layer](inp, h[layer])
-                inp = h[layer]  # output of current layer is input to next
-
-        # Output from final layer goes to output head
-        out = self.fc(inp)
-        return out, h
-
-
-class CustomLSTM(torch.nn.Module):
-    def __init__(self, input_size: int, hidden_sizes: list[int], output_size: int, device: torch.device):
-        """
-        hidden_sizes: list like [16, 32, 20] meaning:
-            layer 0: 16 hidden units
-            layer 1: 32 hidden units
-            layer 2: 20 hidden units
-        """
-        super().__init__()
-
-        self.num_layers = len(hidden_sizes)
-        self.hidden_sizes = hidden_sizes
-        self.device = device
-
-        # Create RNNCell for each layer
-        self.cells = torch.nn.ModuleList()
-
-        for i, h in enumerate(hidden_sizes):
-            inp = input_size if i == 0 else hidden_sizes[i - 1]
-            self.cells.append(torch.nn.LSTMCell(inp, h))
-
-        # Final linear output layer
-        self.fc = torch.nn.Linear(hidden_sizes[-1], output_size)
-
-    def forward(self, x, h=None):
-        """
-        x: (batch, seq_len, input_size)
-        h: list of hidden states for each layer (optional)
-        """
-        batch, seq_len, _ = x.size()
-
-        # Initialize hidden states if not provided
-        if h is None:
-            h = [
-                torch.zeros(batch, hs, device=self.device)
-                for hs in self.hidden_sizes
-            ]
+        else:
+            h = [state.to(self.device) for state in h]
 
         inp = x[:, 0]
         # Process sequence
@@ -218,7 +170,7 @@ class RNNAgent(BaseAgent):
             for name, param in list(self.rnn.named_parameters()):
                 sigma = 0
                 # Find the mutation hyperparam associated with this parameter
-                for key, value in hyperparameters.param_mutations:
+                for key, value in hyperparameters.param_mutations.items():
                     if key in name:
                         sigma = value
                         break
@@ -232,7 +184,7 @@ class RNNAgent(BaseAgent):
         :param x: input to the network
         :return: network's output
         """
-        output, h = self.rnn.forward(x, self.hidden)
+        output, h = self.rnn.forward(x.to(self.device), self.hidden)
         self.hidden = h
         return output
 
@@ -272,6 +224,20 @@ class RNNAgent(BaseAgent):
             noise = torch.randn_like(param) * sigma  # Gaussian noise
             param.data.add_(noise)
 
+    def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, highest_mass: float):
+        """
+        Calculates the fitness of the agent based on the given statistics.
+        :param food_eaten: Number of food cells eaten
+        :param time_alive: Time alive in seconds
+        :param cells_eaten: Number of players cells eaten
+        :param highest_mass: Highest mass achieved
+        :return: Fitness score
+        """
+        return (self.fitness_weights.food * food_eaten +
+                self.fitness_weights.time_alive * time_alive +
+                self.fitness_weights.cells_eaten * cells_eaten +
+                self.fitness_weights.highest_mass * highest_mass)
+
     def get_action(self, objects: list[geometry_utils.GameObject]):
         """
         Returns the action of the RNN after inputting the visible objects.
@@ -281,7 +247,7 @@ class RNNAgent(BaseAgent):
         max_input_objects = self.hyperparameters.input_size // 8
 
         # Convert objects list to tensor input for the network
-        x = torch.zeros((1, self.hyperparameters.input_size))
+        x = torch.zeros((1, self.hyperparameters.input_size)).to(self.device)
         # 8 input nodes per object
         # The 8 nodes are formatted: (food, virus, player, relative pos x, relative pos y, area, perimeter, count)
         i = 0
@@ -305,13 +271,19 @@ class RNNAgent(BaseAgent):
             # Insert into x tensor
             start = i * 8
             end = start + 8
-            x[0, start:end] = torch.tensor(nodes, dtype=torch.float32)
+            x[0, start:end] = torch.tensor(nodes, dtype=torch.float32).to(self.device)
             i += 1
 
         # Feed the input through the network
+        x = x.unsqueeze(1)  # (batch, input_size) -> (batch, seq_len=1, input_size)
         output = self.forward(x)
+
         # Take action with output: (move x, move y, split, eject)
-        move_x, move_y, split, eject = output[0]
+        arr = output[0].detach().cpu().numpy()
+        move_x = float(arr[0])
+        move_y = float(arr[1])
+        split = float(arr[2])
+        eject = float(arr[3])
         return move_x, move_y, split, eject
 
     def run_web_game(self, visualize: bool):
@@ -328,7 +300,7 @@ class RNNAgent(BaseAgent):
 
                 move_x, move_y, split, eject = self.get_action(objects)
 
-                self.scraper.move(move_x, move_y, 1)
+                self.scraper.move(move_x, move_y, 5)
                 if split > 0:
                     self.scraper.press_space()
                 if eject > 0:
@@ -341,10 +313,7 @@ class RNNAgent(BaseAgent):
                         self.alive = False
                         return None
                     food_eaten, time_alive, cells_eaten, highest_mass = stats
-                    self.fitness = (food_eaten * self.fitness_weights.food +
-                                    time_alive * self.fitness_weights.time_alive +
-                                    cells_eaten * self.fitness_weights.cells_eaten +
-                                    highest_mass * self.fitness_weights.highest_mass)
+                    self.fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass)
                     self.alive = False
                     return self.fitness
             time.sleep(self.run_interval)

@@ -15,16 +15,16 @@ import agent
 class Camera(object):
     """Class that converts cartesian pos to pixel pos on the screen."""
 
-    def __init__(self, x, y, width, height, scale=1):
+    def __init__(self, x, y, width, height, scale=1.0):
         # top left point of camera box
         self.x, self.y = x, y
         self.width, self.height = width, height
-        self.scale = 1
+        self.scale = 1.0
 
     def set_center(self, pos):
         """Change camera postion according to passed center."""
-        self.x = pos[0] - self.width/2
-        self.y = pos[1] + self.height/2
+        self.x = pos[0] - self.width*0.5
+        self.y = pos[1] + self.height*0.5
 
     def adjust(self, pos):
         """Convert cartesian pos to pos relative to the camera."""
@@ -61,13 +61,12 @@ class View():
 
     def expand_camera(self):
         """Expand camera view bounds as player's cell grows or splits."""
-        base_width, base_height = self.screen.get_size()
-        score = self.target_player.score()
-        self.camera.width = base_width + score
-        self.camera.height = base_height + score
+        pass
 
     def redraw(self):
         """Redraw screen according to model of game."""
+        if not self.target_player.alive:
+            return
         self.camera.set_center(self.target_player.center())
         self.screen.fill(View.BACKGROUND_COLOR)
         self.draw_grid()
@@ -167,7 +166,7 @@ class View():
             key=lambda pl: pl.score(),
             reverse=True)[:10]
         for i, player in enumerate(top10):
-            lines.append('{}. {}'.format(i + 1, player.nick))
+            lines.append('{}. {} ({})'.format(i + 1, player.nick, round(player.score(), 2)))
         self.draw_hud_item(
              (self.width - 150, 15),
              lines,
@@ -205,28 +204,27 @@ class View():
                     if event.key == pygame.K_w:
                         self.model.shoot(
                             self.target_player,
-                            self.absolute_mouse_pos())
+                            self.game_mouse_pos())
                     elif event.key == pygame.K_SPACE:
                         self.model.split(
                             self.target_player,
-                            self.absolute_mouse_pos())
+                            self.game_mouse_pos())
 
             # Expand camera view bounds as player's cell grows or splits
             self.expand_camera()
 
-            self.model.update_velocity(self.target_player, *(self.mouse_pos_to_polar()))
+            self.model.update_velocity(self.target_player, self.game_mouse_pos())
             self.model.update()
             self.redraw()
             self.clock.tick(self.fps)
 
-    def start_ai_game(self, food_count: int, virus_count: int, agents: list[agent.RNNAgent], cluster_settings: dict, draw_game: bool):
+    def start_ai_game(self, food_count: int, virus_count: int, agents: list[agent.RNNAgent], cluster_settings: dict):
         """
         Starts the game loop for an AI game with RNN agents.
         :param food_count: Number of food cells to spawn
         :param virus_count: Number of viruses to spawn
         :param agents: List of RNN agents to use
         :param cluster_settings: Settings for cell clustering
-        :param draw_game: Whether to draw the game
         :return:
         """
         # Clustering for each cell type to reduce input size to our RNNs
@@ -299,9 +297,9 @@ class View():
                 elif event.type == pygame.KEYDOWN:
                     if human_playing:
                         if event.key == pygame.K_w:
-                            self.model.shoot(self.target_player, self.absolute_mouse_pos())
+                            self.model.shoot(self.target_player, self.game_mouse_pos())
                         elif event.key == pygame.K_SPACE:
-                            self.model.split(self.target_player, self.absolute_mouse_pos())
+                            self.model.split(self.target_player, self.game_mouse_pos())
                     else:
                         # Spectating the AI agents
                         if event.key == pygame.K_LEFT:
@@ -319,7 +317,7 @@ class View():
 
             # Player mouse movement if human player exists
             if human_playing:
-                self.model.update_velocity(self.target_player, *self.mouse_pos_to_polar())
+                self.model.update_velocity(self.target_player, self.game_mouse_pos())
 
             # Execute AI actions
             for i in range(len(agents)):
@@ -354,7 +352,6 @@ class View():
                         objects_in_view.append(visible_obj)
 
                 move_x, move_y, split, eject = agents[i].get_action(objects_in_view)
-                move_angle = math.atan2(move_y, move_x)
 
                 # Normalize move vector
                 move_length = math.sqrt(move_x**2 + move_y**2)
@@ -362,18 +359,18 @@ class View():
                     move_x /= move_length
                     move_y /= move_length
 
-                # Execute actions
-                self.model.update_velocity(players[i], move_angle, agents[i].hyperparameters.move_sensitivity)
                 target_pos = (move_x * agents[i].hyperparameters.move_sensitivity,
                               move_y * agents[i].hyperparameters.move_sensitivity)
+
+                # Execute actions
                 if split > 0.5:
                     players[i].split(target_pos)
                 if eject > 0.5:
                     players[i].shoot(target_pos)
+                self.model.update_velocity(players[i], target_pos)
 
             self.model.update()
-            if draw_game:
-                self.redraw()
+            self.redraw()
             self.clock.tick(self.fps)
 
     def draw_debug_info(self):
@@ -403,7 +400,7 @@ class View():
             self.camera.adjust([x+dx, y+dy]),
             3)
 
-    def absolute_mouse_pos(self):
+    def game_mouse_pos(self):
         """Get mouse position in the game bounds."""
         x, y = self.mouse_pos()
         # Due to camera starting from top left corner

@@ -108,7 +108,7 @@ class GameObject:
         return to_right and to_left and below and above
 
     def __str__(self):
-        return f"{self.label}: ({self.pos.x}, {self.pos.y})"
+        return f"{self.label}: (x: {self.pos.x}, y: {self.pos.y}, area: {self.area}, perimeter: {self.perimeter}, circularity: {self.circularity}, count: {self.count}, bounding box: {self.bounding_box})"
 
     def __repr__(self):
         return self.__str__()

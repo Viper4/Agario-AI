@@ -31,16 +31,21 @@ class Model():
             for j in range((self.bounds[1] * 2) // chunk_size + 1):
                 self.chunks[-1].append(self.Chunk())
 
+        self.num_players = 0
+        self.num_cells = 0
+        self.num_viruses = 0  # Just including viruses within the cells lists since its more convenient
         for player in players:
             self.add_player(player)
+            self.num_players += 1
         for cell in cells:
             self.add_cell(cell)
+            self.num_cells += 1
 
         self.round_start = time.time()
 
-    def update_velocity(self, player, angle, speed):
+    def update_velocity(self, player, target_pos):
         """Update passed player velocity."""
-        player.update_velocity(angle, speed)
+        player.update_velocity(target_pos)
 
     def shoot(self, player, target_pos):
         """Shoots into given direction."""
@@ -66,10 +71,10 @@ class Model():
 
     def update(self):
         """Updates game state."""
-        if time.time() - self.round_start >= self.ROUND_DURATION:
+        '''if time.time() - self.round_start >= self.ROUND_DURATION:
             #logger.debug('New round was started.')
             self.__reset_players()
-            self.round_start = time.time()
+            self.round_start = time.time()'''
 
         # update cells
         for cell in self.cells:
@@ -101,14 +106,15 @@ class Model():
                 if killed_cell:
                     if isinstance(killed_cell, Virus):
                         player.explode(killer_cell)
-                    #logger.debug(f'{player} ate {killed_cell}')
-                    self.remove_cell(killed_cell)
-            
+                        self.remove_virus(killed_cell)
+                    else:
+                        self.remove_cell(killed_cell)
+
             # check is player killed other players or their parts
             for another_player in players:
                 if player == another_player:
                     continue
-                killed_cell = player.attempt_murder(another_player)
+                killed_cell, killer_cell = player.attempt_murder(another_player)
                 if killed_cell:
                     if len(another_player.parts) == 1:
                         logger.debug(f'{player} ate {another_player}')
@@ -126,7 +132,7 @@ class Model():
     def spawn_viruses(self, amount):
         """Spawn a number of viruses on the field."""
         for _ in range(amount):
-            self.add_cell(Virus.make_random(self.bounds))
+            self.add_virus(Virus.make_random(self.bounds))
 
     def bound_cell(self, cell):
         cell.pos[0] = self.bounds[0] if cell.pos[0] > self.bounds[0] else cell.pos[0]
@@ -144,15 +150,32 @@ class Model():
 
     def add_cell(self, cell):
         self.__pos_to_chunk(cell.pos).cells.append(cell)
+        self.num_cells += 1
+
+    def add_virus(self, virus):
+        self.__pos_to_chunk(virus.pos).cells.append(virus)
+        self.num_viruses += 1
 
     def remove_player(self, player):
         try:
             self.__pos_to_chunk(player.center()).players.remove(player)
+            self.num_players -= 1
         except ValueError:
             pass
 
     def remove_cell(self, cell):
-        self.__pos_to_chunk(cell.pos).cells.remove(cell)
+        try:
+            self.__pos_to_chunk(cell.pos).cells.remove(cell)
+            self.num_cells -= 1
+        except ValueError:
+            pass
+
+    def remove_virus(self, virus):
+        try:
+            self.__pos_to_chunk(virus.pos).cells.remove(virus)
+            self.num_viruses -= 1
+        except ValueError:
+            pass
 
     def copy_for_client(self, pos):
         chunks = self.__nearby_chunks(pos)

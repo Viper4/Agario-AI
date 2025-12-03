@@ -1,4 +1,5 @@
 import math
+import time
 from operator import add, sub
 
 from .. import gameutils as gu
@@ -23,8 +24,11 @@ class PlayerCell(Cell, interfaces.Killer):
     # min ratius of cell to be able split
     SPLITCELL_COND_RADIUS = 40
     SPLITCELL_SPEED = 3
-    # the time before a сell can merge with another cell
-    SPLIT_TIMEOUT = 1800  # Number of frames. Should be 30 seconds which is 1800 frames in 60 FPS.
+    # the time before a сell can merge with another cell in seconds
+    SPLIT_TIMEOUT = 30
+
+    DECAY_TIME = 5.0
+    MIN_RADIUS = 20
 
     def __init__(self, pos, radius, color, angle=0, speed=0):
         super().__init__(pos, radius, color, angle, speed)
@@ -32,10 +36,12 @@ class PlayerCell(Cell, interfaces.Killer):
         self.split_timeout = self.SPLIT_TIMEOUT + int(self.mass() * 0.0233)
         # food storage, to make the radius change smooth
         self.area_pool = 0
+        self.decay_timer = self.DECAY_TIME  # Lose 1 radius every x seconds
+        self.last_tick_time = time.time()
 
     def move(self):
         """Update cell state and move by stored velocity."""
-        self.__split_timeout_tick()
+        self.__tick()
         self.__add_area(self.__area_pool_give_out())
         super().move()
 
@@ -50,10 +56,20 @@ class PlayerCell(Cell, interfaces.Killer):
             self.area_pool += cell.area()
         self.__add_area(self.__area_pool_give_out())
 
-    def __split_timeout_tick(self):
-        """Simply changes timeout value by one."""
+    def __tick(self):
+        """Make updates over time."""
+        now = time.time()
+        dt = now - self.last_tick_time
+        self.last_tick_time = now
+        # Count down split timer
         if self.split_timeout > 0:
-            self.split_timeout -= 1
+            self.split_timeout -= dt
+
+        # Decay mass
+        if self.radius > self.MIN_RADIUS and self.decay_timer <= 0:
+            self.radius -= 1
+            self.decay_timer = self.DECAY_TIME
+        self.decay_timer -= dt
 
     def __add_area(self, area):
         """Increase current cell area with passed area."""

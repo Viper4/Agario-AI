@@ -16,6 +16,13 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))  # Get directory of pro
 
 class WebScraper:
     def __init__(self):
+        self.driver = None
+        self.main_ui = None
+        self.canvas = None
+        self.actions = None
+        self.canvas_png = None
+
+    def connect_to_game(self):
         options = Options()
 
         # Set up web driver options to avoid bot detection
@@ -29,24 +36,27 @@ class WebScraper:
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
 
         # User agents to rotate through
-        user_agents = ["Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.10 Safari/605.1.1",
-                       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.3",
-                       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.3",
-                       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.3",
-                       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Trailer/93.3.8652.5",
-                       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.",
-                       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.",
-                       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 OPR/117.0.0.",
-                       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 Edg/132.0.0.",
-                       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36 Edge/18.1958",
-                       "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.",
-                       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.3"]
+        user_agents = [
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.10 Safari/605.1.1",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.3",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.3",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.3",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Trailer/93.3.8652.5",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 OPR/117.0.0.",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 Edg/132.0.0.",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36 Edge/18.1958",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.3"]
 
         options.add_argument(f"user-agent={random.choice(user_agents)}")  # Pick random user agent to use
 
-        options.add_argument("--host-rules=MAP ads.google.com 127.0.0.1,MAP doubleclick.net 127.0.0.1,MAP adservice.google.com 127.0.0.1")
+        options.add_argument(
+            "--host-rules=MAP ads.google.com 127.0.0.1,MAP doubleclick.net 127.0.0.1,MAP adservice.google.com 127.0.0.1")
 
-        service = Service(executable_path=os.path.join(PROJECT_DIR, "WebStuff", "msedgedriver.exe"))  # Define custom webdriver executable
+        service = Service(executable_path=os.path.join(PROJECT_DIR, "WebStuff",
+                                                       "msedgedriver.exe"))  # Define custom webdriver executable
         # driver = webdriver.Chrome(options, service)
         self.driver = webdriver.Edge(options, service)
 
@@ -57,15 +67,13 @@ class WebScraper:
 
         # Run JavaScript in console to remove ads periodically
         hide_ads_script = """
-        setInterval(() => {
-            ['iframe', '#adsBottom', '#adbg', '#openfl-content'].forEach(s => {
-                document.querySelectorAll(s).forEach(e => e.remove());
-            });
-        }, 500);
-        """
+                setInterval(() => {
+                    ['iframe', '#adsBottom', '#adbg', '#openfl-content'].forEach(s => {
+                        document.querySelectorAll(s).forEach(e => e.remove());
+                    });
+                }, 500);
+                """
         self.driver.execute_script(hide_ads_script)
-
-        self.canvas_png = None
 
     def screenshot_canvas_image(self):
         """

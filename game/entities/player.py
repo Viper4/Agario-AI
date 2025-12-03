@@ -1,16 +1,18 @@
 import functools
 import operator
 import math
+import time
 
 from .. import gameutils as gu
 from . import interfaces
 from .playercell import PlayerCell
+from .virus import Virus
 
 
 class Player(interfaces.Victim, interfaces.Killer):
     """Class that represents player game state."""
 
-    START_SIZE = 31.62  # Starting mass in agar.io is 10 and mass = size^2 / 100
+    START_SIZE = 20
     BORDER_WIDTH = 5
 
     LAST_ID = -1
@@ -23,6 +25,12 @@ class Player(interfaces.Victim, interfaces.Killer):
         # cells of which player consists
         self.parts = [player_cell]
         # self.parts = [PlayerCell(pos, radius, color, border_color)]
+        self.num_food_eaten = 0
+        self.num_players_eaten = 0
+        self.highest_score = 0.0
+        self.time_alive = 0.0
+        self.start_time = time.time()
+        self.alive = True
 
     def move(self):
         """Move each part of player and check parts for collision."""
@@ -35,24 +43,21 @@ class Player(interfaces.Victim, interfaces.Killer):
 
                 # merge cells if their timeout is zero
                 # otherwise get rid off colission between them
-                if cell.split_timeout == 0 and another_cell.split_timeout == 0:
+                if cell.split_timeout <= 0 and another_cell.split_timeout <= 0:
                     cell.eat(another_cell, len(self.parts), self.MAX_PARTS)
                     self.parts.remove(another_cell)
                 else:
                     cell.regurgitate_from(another_cell)
 
-    def update_velocity(self, angle, speed):
+    def update_velocity(self, target_pos):
         """Update velocity of each part."""
-        center_pos = self.center()
         for cell in self.parts:
-            # get realtive velocity
-            rel_vel = gu.velocity_relative_to_pos(
-                center_pos,
-                angle,
-                speed,
-                cell.pos)
-            # update velocity of cell
-            cell.update_velocity(*rel_vel)
+            direction = (target_pos[0] - cell.pos[0], target_pos[1] - cell.pos[1])
+            angle = math.atan2(direction[1], direction[0])
+
+            # Calculate speed as square distance to target pos from this cell
+            speed = min(1.0, (direction[0] * direction[0] + direction[1] * direction[1]) / 10000)
+            cell.update_velocity(angle, speed)
 
     def shoot(self, target_pos):
         """Shoots with cells towards target_pos."""
@@ -113,13 +118,16 @@ class Player(interfaces.Victim, interfaces.Killer):
         return center
 
     def score(self):
-        """Returns player score.
+        """Returns player score and updates highest score.
         Score is radius of circle that consists of all parts area sum.
         """
         radius_sqr = functools.reduce(
             operator.add,
             (cell.radius**2 for cell in self.parts))
-        return math.sqrt(radius_sqr)
+        score = math.sqrt(radius_sqr)
+        if score > self.highest_score:
+            self.highest_score = score
+        return score
 
     def attempt_murder(self, victim):
         """Try to kill passed victim by player parts. 
@@ -130,6 +138,10 @@ class Player(interfaces.Victim, interfaces.Killer):
             if killed_cell:
                 # feed player cell with killed cell
                 cell.eat(killed_cell, len(self.parts), self.MAX_PARTS)
+                if isinstance(killed_cell, PlayerCell):
+                    self.num_players_eaten += 1
+                elif not isinstance(killed_cell, Virus):
+                    self.num_food_eaten += 1
                 return killed_cell, cell
         return None, None
 
@@ -150,7 +162,13 @@ class Player(interfaces.Victim, interfaces.Killer):
 
     def remove_part(self, cell):
         """Removes passed player cell from player parts list."""
-        self.parts.remove(cell)
+        try:
+            self.parts.remove(cell)
+        except ValueError:
+            pass
+        if len(self.parts) == 0:
+            self.time_alive = time.time() - self.start_time
+            self.alive = False
 
     def reset(self):
         self.parts = self.parts[:1]

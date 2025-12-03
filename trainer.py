@@ -1,11 +1,11 @@
-from agent import BaseAgent, RNNAgent, ModelBasedReflexAgent
 import torch
 import numpy as np
-from agent import Hyperparameters, FitnessWeights
+import random
+import agario_simulation
+import json
+from agent import RNNAgent, Hyperparameters, FitnessWeights
 from multiprocessing import Pool
 from tqdm import tqdm
-import time
-import random
 
 
 class GeneticTrainer:
@@ -57,32 +57,55 @@ class GeneticTrainer:
             children.append(child)
         return children
 
-    def train(self):
+    def train(self, num_simulations: int):
         """
         Starts the training loop
+        :param num_simulations: Number of simulations to run per generation.
         :return: Final population
         """
         generation = 0
         self.init_agents()
+
+        with open("cluster_settings.json") as f:
+            cluster_settings = json.load(f)
+
         while self.max_generations is None or generation < self.max_generations:
-            # Run 5 simulations in parallel
-            pool = Pool()
+            simulation = agario_simulation.AgarioSimulation(900, 600, 1500, 500, 20, self.population)
+            total_sim_fitnesses = [0.0] * self.population_size  # Element at i = total fitness of agent i over all simulations
+
+            # Run simulations in sequence
+            for _ in tqdm(range(num_simulations), desc=f"Generation {generation}", total=num_simulations):
+                sim_fitnesses = simulation.run_headless(cluster_settings, 0.01, 240)
+                for i in range(self.population_size):
+                    total_sim_fitnesses[i] += sim_fitnesses[i]
+
+            # Run simulations in parallel
+            # TODO: Implement parallel simulation
+            # - Cant pickle the RNNs, so figure out how to pass them to the child processes
+            # - Maybe copy over all the agents and simulation from self.population to the child process somehow
+            '''pool = Pool(processes=8)
             jobs = []
-            for i in range(self.population_size):
-                jobs.append(pool.apply_async(self.population[i].run_web_game, args=(True,)))
+            for i in range(num_simulations):
+                jobs.append(pool.apply_async(simulation.run_headless, args=(cluster_settings, 0.1, 240)))
             pool.close()
             pool.join()
 
             # Wait for all jobs to finish and collect fitness
-            total_fitness = 0.0
-            for job in tqdm(jobs, desc=f"Generation {generation}", total=self.population_size):
-                job.get()
+            for job in tqdm(jobs, desc=f"Generation {generation}", total=num_simulations):
+                sim_fitnesses = job.get()
+                for i in range(self.population_size):
+                    total_sim_fitnesses[i] += sim_fitnesses[i]'''
+
+            total_final_fitness = 0.0
+            for i in range(self.population_size):
+                self.population[i].fitness = total_sim_fitnesses[i] / num_simulations
+                total_final_fitness += self.population[i].fitness
 
             # Print generation statistics
             self.population.sort(key=lambda x: x.fitness, reverse=True)
 
             print(f"Generation {generation} complete")
-            print(f"Mean fitness: {total_fitness / self.population_size:.2f}")
+            print(f"Mean fitness: {total_final_fitness / self.population_size:.2f}")
             print(f"Fitness standard deviation: {repr(np.std([x.fitness for x in self.population]))}")
             print(f"Rank\t\t|\t\tFitness")
             print("-" * 20)
@@ -126,22 +149,21 @@ class GeneticTrainer:
 if __name__ == "__main__":
     # Max number of objects on screen at a time reaches ~50 so define fixed input of 32 objects with 8 nodes per object
     hyperparameters = Hyperparameters(input_size=256,
-                                      hidden_layers=[32, 16],
+                                      hidden_layers=[64],
                                       output_size=4,
                                       run_interval=0.2,
                                       param_mutations={"weight": 0.5, "bias": 0.25},
-                                      move_sensitivity=2.5)
+                                      move_sensitivity=50.0)
     fitness_weights = FitnessWeights(food=0.75, time_alive=0.5, cells_eaten=2.0, highest_mass=1.5)
 
-    command = input("Enter command> ")
+    trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
+                             hyperparameters=hyperparameters,
+                             fitness_weights=fitness_weights)
+    trainer.train(5)
+
+    '''command = input("Enter command> ")
     if command == "train":
-        if input("Select trainer (0=Model Based, 1=Genetic)> ") == "0":
-            pass
-        else:
-            trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
-                                     hyperparameters=hyperparameters,
-                                     fitness_weights=fitness_weights)
-            trainer.train()
+        
     elif command == "test":
         model_selection = input("Select model to test (0=None, 1=Model Based, 2=Neural Network)> ")
         if model_selection == "0":
@@ -157,5 +179,4 @@ if __name__ == "__main__":
                                      device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
             print(f"Game finished with {network_agent.run_web_game(True)} fitness")
     else:
-        print("Invalid command")
-
+        print("Invalid command")'''

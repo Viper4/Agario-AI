@@ -2,7 +2,7 @@
   "virus": {
     "identify_by": "mask",
     "cluster_by": "edge",
-    "max_count": 4,
+    "max_count": 2,
     "cluster_distance": 200.0
   },
   "unknown": {
@@ -12,7 +12,7 @@
         "min_perimeter": 25.0,
         "max_perimeter": 175.0,
         "cluster_by": "center",
-        "max_count": 32,
+        "max_count": 16,
         "cluster_distance": 175.0
       },
       "player": {
