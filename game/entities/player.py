@@ -176,9 +176,9 @@ class Player(interfaces.Victim, interfaces.Killer):
         self.parts[0].radius = self.START_SIZE
 
     @classmethod
-    def make_random(cls, nick, bounds):
+    def make_random(cls, fps, nick, bounds):
         """Returns random player with given nick."""
-        player_cell = PlayerCell.make_random(bounds)
+        player_cell = PlayerCell.make_random(fps, bounds)
         player_cell.radius = cls.START_SIZE
         return cls(nick, player_cell)
 

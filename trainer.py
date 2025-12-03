@@ -3,9 +3,24 @@ import numpy as np
 import random
 import agario_simulation
 import json
+import pickle
+import sys
 from agent import RNNAgent, Hyperparameters, FitnessWeights
 from multiprocessing import Pool
 from tqdm import tqdm
+
+
+# Function needs to be picklable so keep it out of classes
+def run_simulation_worker(cluster_settings: dict, simulation_speed: float, duration: float, agent_snapshots: list[dict], pickled_data: bytes):
+    hyperparameters, fitness_weights = pickle.loads(pickled_data)
+    agents = []
+    for agent_snapshot in agent_snapshots:
+        # Reconstruct agent from snapshot
+        agent = RNNAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))  # CPU only for multiprocessing
+        agent.rnn.load_state_dict(agent_snapshot)  # Load agent parameters from snapshot
+        agents.append(agent)
+    sim = agario_simulation.AgarioSimulation(900, 600, 1500, 500, 20, agents)
+    return sim.run_headless(cluster_settings, simulation_speed, duration)
 
 
 class GeneticTrainer:
@@ -15,7 +30,6 @@ class GeneticTrainer:
         self.fitness_weights = fitness_weights
         self.max_generations = max_generations
         self.population = []
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def init_agents(self):
         """
@@ -24,7 +38,7 @@ class GeneticTrainer:
         """
         for i in range(self.population_size):
             self.population.append(RNNAgent(self.hyperparameters, fitness_weights=self.fitness_weights,
-                                            randomize_params=True, device=self.device))
+                                            randomize_params=True, device=torch.device("cpu")))
 
     def reproduce(self, parent1: RNNAgent, parent2: RNNAgent, num_children: int):
         """
@@ -39,7 +53,7 @@ class GeneticTrainer:
         children = []
         for i in range(num_children):
             child = RNNAgent(self.hyperparameters, fitness_weights=self.fitness_weights,
-                             randomize_params=False, device=self.device)
+                             randomize_params=False, device=torch.device("cpu"))
 
             # Crossover from both parents
             for (param1, param2, param_child) in zip(
@@ -70,31 +84,46 @@ class GeneticTrainer:
             cluster_settings = json.load(f)
 
         while self.max_generations is None or generation < self.max_generations:
-            simulation = agario_simulation.AgarioSimulation(900, 600, 1500, 500, 20, self.population)
             total_sim_fitnesses = [0.0] * self.population_size  # Element at i = total fitness of agent i over all simulations
 
             # Run simulations in sequence
+            '''simulation = agario_simulation.AgarioSimulation(900, 600, 2000, 500, 20, self.population)
             for _ in tqdm(range(num_simulations), desc=f"Generation {generation}", total=num_simulations):
-                sim_fitnesses = simulation.run_headless(cluster_settings, 0.01, 240)
-                for i in range(self.population_size):
-                    total_sim_fitnesses[i] += sim_fitnesses[i]
-
-            # Run simulations in parallel
-            # TODO: Implement parallel simulation
-            # - Cant pickle the RNNs, so figure out how to pass them to the child processes
-            # - Maybe copy over all the agents and simulation from self.population to the child process somehow
-            '''pool = Pool(processes=8)
-            jobs = []
-            for i in range(num_simulations):
-                jobs.append(pool.apply_async(simulation.run_headless, args=(cluster_settings, 0.1, 240)))
-            pool.close()
-            pool.join()
-
-            # Wait for all jobs to finish and collect fitness
-            for job in tqdm(jobs, desc=f"Generation {generation}", total=num_simulations):
-                sim_fitnesses = job.get()
+                sim_fitnesses = simulation.run_headless(cluster_settings, 2.0, 240)
                 for i in range(self.population_size):
                     total_sim_fitnesses[i] += sim_fitnesses[i]'''
+
+            # Run simulations in parallel, one process per simulation
+            # Prepare state dicts of agents
+            agent_snapshots = [agent.rnn.state_dict() for agent in self.population]
+            pickled_data = pickle.dumps((self.hyperparameters, self.fitness_weights))
+
+            pool = Pool(processes=max(num_simulations, 8))
+            jobs = []
+            try:
+                for i in range(num_simulations):
+                    jobs.append(pool.apply_async(
+                        run_simulation_worker,
+                        args=(cluster_settings, 3.0, 240, agent_snapshots, pickled_data,)
+                    ))
+
+                pool.close()  # no more tasks
+                # Wait for all jobs to finish and collect fitness
+                for job in tqdm(jobs, desc=f"Generation {generation}", total=num_simulations):
+                    try:
+                        sim_fitnesses = job.get()
+                        for i in range(self.population_size):
+                            total_sim_fitnesses[i] += sim_fitnesses[i]
+                    except TimeoutError:
+                        # job still running, loop back to allow keyboardinterrupt checking
+                        continue
+
+                pool.join()
+            except KeyboardInterrupt:
+                print("\n[!] Ctrl-C caught in parent: terminating pool...")
+                pool.terminate()  # force kill workers
+                pool.join()
+                sys.exit(1)
 
             total_final_fitness = 0.0
             for i in range(self.population_size):
@@ -106,12 +135,12 @@ class GeneticTrainer:
 
             print(f"Generation {generation} complete")
             print(f"Mean fitness: {total_final_fitness / self.population_size:.2f}")
-            print(f"Fitness standard deviation: {repr(np.std([x.fitness for x in self.population]))}")
+            print(f"Fitness standard deviation: {np.std([x.fitness for x in self.population]).item():.4f}")
             print(f"Rank\t\t|\t\tFitness")
-            print("-" * 20)
+            print("-" * 40)
             for i in range(self.population_size):
                 print(f"{i}\t\t|\t\t{repr(self.population[i].fitness)}")
-            print("-" * 20)
+            print("-" * 40)
 
             # Create new population
             new_population = []
@@ -149,7 +178,7 @@ class GeneticTrainer:
 if __name__ == "__main__":
     # Max number of objects on screen at a time reaches ~50 so define fixed input of 32 objects with 8 nodes per object
     hyperparameters = Hyperparameters(input_size=256,
-                                      hidden_layers=[64],
+                                      hidden_layers=[64, 32],
                                       output_size=4,
                                       run_interval=0.2,
                                       param_mutations={"weight": 0.5, "bias": 0.25},

@@ -216,7 +216,7 @@ class RNNAgent(BaseAgent):
         for name, param in list(self.rnn.named_parameters()):
             sigma = 0
             # Find the mutation hyperparam(s) associated with this parameter
-            for key, value in self.hyperparameters.param_mutations:
+            for key, value in self.hyperparameters.param_mutations.items():
                 if key in name:
                     sigma = value
                     break

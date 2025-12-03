@@ -19,7 +19,7 @@ class Model():
     # duration of round in seconds
     ROUND_DURATION = 240
 
-    def __init__(self, players=None, cells=None, bounds=(1000, 1000), chunk_size=1000):
+    def __init__(self, players=None, cells=None, bounds=(1000, 1000), chunk_size=1000, fps=60):
         players = list() if players is None else players
         cells = list() if cells is None else cells
         # means that size of world is [-world_size, world_size]
@@ -42,6 +42,7 @@ class Model():
             self.num_cells += 1
 
         self.round_start = time.time()
+        self.fps = fps
 
     def update_velocity(self, player, target_pos):
         """Update passed player velocity."""
@@ -123,16 +124,17 @@ class Model():
                         another_player.remove_part(killed_cell)
                     else:
                         logger.debug(f'{player} ate {another_player} part {killed_cell}')
+                        another_player.remove_part(killed_cell)
 
     def spawn_cells(self, amount):
         """Spawn passed amount of cells on the field."""
         for _ in range(amount):
-            self.add_cell(Cell.make_random(self.bounds))
+            self.add_cell(Cell.make_random(self.fps, self.bounds))
 
     def spawn_viruses(self, amount):
         """Spawn a number of viruses on the field."""
         for _ in range(amount):
-            self.add_virus(Virus.make_random(self.bounds))
+            self.add_virus(Virus.make_random(self.fps, self.bounds))
 
     def bound_cell(self, cell):
         cell.pos[0] = self.bounds[0] if cell.pos[0] > self.bounds[0] else cell.pos[0]

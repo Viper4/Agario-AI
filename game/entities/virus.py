@@ -1,5 +1,4 @@
 import random
-import math
 
 from .cell import Cell
 from .. import gameutils as gu
@@ -20,9 +19,9 @@ class Virus(Cell):
 
     DEFAULT_COLOR = (80, 200, 120)
 
-    def __init__(self, pos, radius, color=None, angle=0, speed=0):
+    def __init__(self, fps, pos, radius, color=None, angle=0, speed=0):
         color = self.DEFAULT_COLOR if color is None else color
-        super().__init__(pos, radius, color, angle, speed)
+        super().__init__(fps, pos, radius, color, angle, speed)
 
     def move(self):
         """Viruses are static by default."""
@@ -32,14 +31,14 @@ class Virus(Cell):
         """If a player cell fully engulfs the virus, the virus is considered 'killed'.
         Returning self allows the model to remove the virus and then apply splitting logic.
         """
-        # Use engulfing condition similar to Cell, but without area ratio constraint
-        if self.distance_to(killer) <= killer.radius - self.radius:
+        # Must be ~82% mass of killer to be eaten
+        if self.mass() < killer.mass() * 0.82 and self.distance_to(killer) <= killer.radius - self.radius:
             return self
         return None
 
     @classmethod
-    def make_random(cls, bounds):
+    def make_random(cls, fps, bounds):
         pos = gu.random_pos(bounds)
         radius = random.choices(cls.SIZES, cls.SIZES_CUM)[0]
         color = cls.DEFAULT_COLOR
-        return cls(pos, radius, color)
+        return cls(fps, pos, radius, color)

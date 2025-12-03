@@ -30,8 +30,8 @@ class PlayerCell(Cell, interfaces.Killer):
     DECAY_TIME = 5.0
     MIN_RADIUS = 20
 
-    def __init__(self, pos, radius, color, angle=0, speed=0):
-        super().__init__(pos, radius, color, angle, speed)
+    def __init__(self, fps, pos, radius, color, angle=0, speed=0):
+        super().__init__(fps, pos, radius, color, angle, speed)
         # merge_time = 30 + cell mass * 2.33%
         self.split_timeout = self.SPLIT_TIMEOUT + int(self.mass() * 0.0233)
         # food storage, to make the radius change smooth
@@ -59,7 +59,7 @@ class PlayerCell(Cell, interfaces.Killer):
     def __tick(self):
         """Make updates over time."""
         now = time.time()
-        dt = now - self.last_tick_time
+        dt = (now - self.last_tick_time) * self.time_scale
         self.last_tick_time = now
         # Count down split timer
         if self.split_timeout > 0:
@@ -100,6 +100,7 @@ class PlayerCell(Cell, interfaces.Killer):
         """
         # create emmited object at pos [0, 0]
         obj = ObjClass(
+            self.fps,
             [0, 0], radius, 
             self.color, 
             angle, speed)

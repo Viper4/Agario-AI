@@ -14,7 +14,7 @@ class Cell(Circle, Victim):
     SIZES = (6, 7, 8)
     SIZES_CUM = (20, 70, 10)
 
-    def __init__(self, pos, radius, color, angle=0, speed=0):
+    def __init__(self, fps, pos, radius, color, angle=0, speed=0):
         super().__init__(pos, radius)
         # cell color [r, g, b]
         self.color = color
@@ -23,6 +23,8 @@ class Cell(Circle, Victim):
         # speed coeff from 0.0 to 1.0
         self.speed = speed
         self.num_food_eaten = 0
+        self.fps = fps
+        self.time_scale = 60 / fps  # 60 FPS is the default running speed for a normal game
 
     def move(self):
         """Move accroding to stored velocity."""
@@ -69,12 +71,12 @@ class Cell(Circle, Victim):
         return (self.radius * self.radius) / 100
 
     @classmethod
-    def make_random(cls, bounds):
+    def make_random(cls, fps, bounds):
         """Creates random cell."""
         pos = gu.random_pos(bounds)
         radius = random.choices(cls.SIZES, cls.SIZES_CUM)[0]
         color = gu.random_safe_color()
-        return cls(pos, radius, color)
+        return cls(fps, pos, radius, color)
 
     def __repr__(self):
         return '<{} pos={} radius={}>'.format(

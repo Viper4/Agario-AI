@@ -24,23 +24,31 @@ class AgarioSimulation:
     def run_headless(self, cluster_settings: dict, simulation_speed: float, duration: float):
         """
         Runs simulation with only AI agents without drawing the game's visuals.
+        Stops when the duration is reached or when only 1 agent is alive.
         :param cluster_settings: Settings for clustering objects in the game
-        :param simulation_speed: Iterations per second
+        :param simulation_speed: Number of times faster the simulation runs
         :param duration: Duration of the simulation until termination in seconds
-        :return:
+        :return: List of fitness values for each agent
         """
+        # We'll define 60 FPS as the default running speed for a normal game
+        # So we need to scale time for the simulation to run at the desired speed
+        fps = 60 * simulation_speed
+        spf = 1 / fps
+        time_scale = 1 / simulation_speed
+        scaled_duration = duration * time_scale
+
         bounds = [self.bounds, self.bounds]
 
         players = []
         prev_target_pos = []
 
         for i in range(len(self.agents)):
-            ai_player = Player.make_random(f"Agent {i}", bounds)
+            ai_player = Player.make_random(fps, f"Agent {i}", bounds)
             players.append(ai_player)
 
             prev_target_pos.append(players[i].center())
 
-        model = Model(players, bounds=bounds)
+        model = Model(players, bounds=bounds, fps=fps)
         model.spawn_cells(self.food_count)
         model.spawn_viruses(self.virus_count)
 
@@ -70,9 +78,9 @@ class AgarioSimulation:
         start_time = time.time()
         last_agent_run_time = -100000
         while True:
-            if time.time() - start_time >= duration:
+            if time.time() - start_time >= scaled_duration:
                 break
-            run_agent = time.time() - last_agent_run_time >= self.agents[0].run_interval
+            run_agent = time.time() - last_agent_run_time >= self.agents[0].run_interval * time_scale
 
             if not run_agent:
                 # Maintain previous move for next frame(s)
@@ -210,10 +218,8 @@ class AgarioSimulation:
 
                 last_agent_run_time = time.time()
 
-                if agents_alive == 0:
+                if agents_alive <= 1:
                     break
-
-                #view.redraw()
 
             # Maintain virus and food counts
             if model.num_viruses < self.virus_count:
@@ -223,7 +229,7 @@ class AgarioSimulation:
 
             model.update()
             view.redraw()
-            time.sleep(simulation_speed)
+            time.sleep(spf)
 
         fitnesses = []
         for i in range(len(self.agents)):
@@ -233,41 +239,6 @@ class AgarioSimulation:
                                                               players[i].highest_score))
         print(f"Simulation complete after {time.time() - start_time:.2f} seconds")
         return fitnesses
-
-    def run_drawn(self, cluster_settings: dict, human_playing: bool, width: int, height: int):
-        """
-        Runs the simulation with drawn visualization.
-        :param cluster_settings: Settings for clustering objects in the game
-        :param human_playing: Whether the user will play in the simulation as well
-        :return:
-        """
-        bounds = [self.bounds, self.bounds]
-
-        players = []
-        prev_target_pos = []
-
-        for i in range(len(self.agents)):
-            ai_player = Player.make_random(f"Agent {i}", bounds)
-            players.append(ai_player)
-
-            prev_target_pos.append(players[i].center())
-
-        human_player = None
-        if human_playing:
-            human_player = Player.make_random("Human", bounds)
-        players.append(human_player)
-
-        model = Model(players, bounds=bounds)
-        model.spawn_cells(self.food_count)
-        model.spawn_viruses(self.virus_count)
-
-        pygame.init()
-        screen = pygame.display.set_mode((width, height))
-        pygame.display.set_caption('Agar.io Offline')
-
-        # Start view loop (handles input: mouse to move, W to shoot, SPACE to split)
-        view = View(screen, model, human_player, debug=False)
-        view.start_ai_game(self.food_count, self.virus_count, self.agents, cluster_settings)
 
 
 def main():
@@ -289,10 +260,10 @@ def main():
 
     players = []
     for i in range(args.agents):
-        ai_player = Player.make_random(f"Agent {i}", bounds)
+        ai_player = Player.make_random(60, f"Agent {i}", bounds)
         players.append(ai_player)
 
-    player = Player.make_random(args.nick, bounds)
+    player = Player.make_random(60, args.nick, bounds)
     players.append(player)
 
     model = Model(players, bounds=bounds)
@@ -305,7 +276,6 @@ def main():
 
     with open("cluster_settings.json") as f:
         cluster_settings = json.load(f)
-    view.start_ai_game(args.food, args.viruses, [ai_agent] * args.agents, cluster_settings)
 
 
 if __name__ == '__main__':

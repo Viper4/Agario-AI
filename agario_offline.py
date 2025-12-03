@@ -49,8 +49,8 @@ def main():
     bounds = [args.bounds, args.bounds]
 
     # Create player and model
-    players = [Player.make_random(f"Husk {i}", bounds) for i in range(5)]
-    player = Player.make_random(args.nick, bounds)
+    players = [Player.make_random(60, f"Husk {i}", bounds) for i in range(5)]
+    player = Player.make_random(60, args.nick, bounds)
     players.append(player)
     model = Model(players, bounds=bounds)
     model.spawn_cells(args.food)
