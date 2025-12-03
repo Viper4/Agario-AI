@@ -1,5 +1,5 @@
 import random
-from operator import add, sub
+from operator import add
 
 from .. import gameutils as gu
 from .interfaces import Victim
@@ -25,16 +25,17 @@ class Cell(Circle, Victim):
         self.num_food_eaten = 0
         self.fps = fps
         self.time_scale = 60 / fps  # 60 FPS is the default running speed for a normal game
+        self.id = random.randint(0, 100000)
 
-    def move(self):
+    def move(self, sim_speed):
         """Move accroding to stored velocity."""
-        self.speed -= self.FRICTION
+        self.speed -= self.FRICTION * self.time_scale * sim_speed
         if self.speed < 0:
             self.speed = 0
         # Max speed affected by size with this formula: speed = (mass / mass^1.44) * 10
-        MAX_SPEED = (self.mass() / self.mass()**1.44) * 10
+        MAX_SPEED = (self.mass() / self.mass()**1.4) * 10
         # get cartesian vector
-        diff_xy = gu.polar_to_cartesian(self.angle, self.speed*MAX_SPEED)
+        diff_xy = gu.polar_to_cartesian(self.angle, self.speed*MAX_SPEED * self.time_scale * sim_speed)
         # change position
         self.pos = list(map(add, self.pos, diff_xy))
 

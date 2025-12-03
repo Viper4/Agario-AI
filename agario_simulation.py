@@ -6,8 +6,8 @@ import agent
 import time
 import math
 from game.view import View
-from game.model import Model
-from game.entities import Player, Virus
+from game.new_model import Model
+from game.entities import Player
 from geometry_utils import Vector, GameObject
 from image_processing import ImageProcessing
 
@@ -21,18 +21,16 @@ class AgarioSimulation:
         self.virus_count = virus_count
         self.agents = agents
 
-    def run_headless(self, cluster_settings: dict, simulation_speed: float, duration: float):
+    def run_headless(self, cluster_settings: dict, fps: int, simulation_speed: float, duration: float):
         """
         Runs simulation with only AI agents without drawing the game's visuals.
         Stops when the duration is reached or when only 1 agent is alive.
         :param cluster_settings: Settings for clustering objects in the game
+        :param fps: Frames per second or number of model updates per second
         :param simulation_speed: Number of times faster the simulation runs
         :param duration: Duration of the simulation until termination in seconds
         :return: List of fitness values for each agent
         """
-        # We'll define 60 FPS as the default running speed for a normal game
-        # So we need to scale time for the simulation to run at the desired speed
-        fps = 60 * simulation_speed
         spf = 1 / fps
         time_scale = 1 / simulation_speed
         scaled_duration = duration * time_scale
@@ -48,14 +46,14 @@ class AgarioSimulation:
 
             prev_target_pos.append(players[i].center())
 
-        model = Model(players, bounds=bounds, fps=fps)
+        model = Model(players, bounds=bounds, fps=fps, sim_speed=simulation_speed)
         model.spawn_cells(self.food_count)
         model.spawn_viruses(self.virus_count)
 
-        pygame.init()
-        screen = pygame.display.set_mode((self.base_view_width, self.base_view_height))
-        pygame.display.set_caption('Agar.io AI Offline')
-        view = View(screen, model, players[0], debug=False)
+        #pygame.init()
+        #screen = pygame.display.set_mode((self.base_view_width, self.base_view_height))
+        #pygame.display.set_caption('Agar.io AI Simulation')
+        #view = View(screen, model, players[0], debug=False)
 
         # Clustering for each cell type to reduce input size to our RNNs
         # The way the JSON settings are set up is stupid but it's what works best with object recognition
@@ -80,35 +78,48 @@ class AgarioSimulation:
         while True:
             if time.time() - start_time >= scaled_duration:
                 break
+
+            num_viruses = model.virus_count()
+            num_cells = model.cell_count()
+            # Maintain virus and food counts
+            if num_viruses < self.virus_count:
+                model.spawn_viruses(self.virus_count - num_viruses)
+            if num_cells < self.food_count:
+                model.spawn_cells(self.food_count - num_cells)
+
             run_agent = time.time() - last_agent_run_time >= self.agents[0].run_interval * time_scale
 
-            if not run_agent:
-                # Maintain previous move for next frame(s)
-                for i in range(len(players)):
-                    model.update_velocity(players[i], prev_target_pos[i])
-            else:
-                cells = model.cells
-
+            if run_agent:
                 # Lists of objects we'll use as input to the RNNs
                 virus_objs = []
                 player_objs = []
                 food_objs = []
 
-                for cell in cells:
+                for cell in model.cells:
+                    if cell is None:
+                        continue
                     pos = Vector(cell.pos[0], cell.pos[1])
                     top_left = Vector(pos.x - cell.radius, pos.y + cell.radius)
                     bottom_right = Vector(pos.x + cell.radius, pos.y - cell.radius)
                     bounds = (top_left, bottom_right)
-                    if isinstance(cell, Virus):
-                        # Cluster viruses to be input to RNN
-                        virus_obj = GameObject("virus", pos, cell.area(), cell.perimeter(), 0.9, 1, bounds)
-                        ImageProcessing.cluster_or_add(virus_obj, virus_objs, "virus", max_cluster_counts["virus"], cluster_by["virus"], cluster_distances["virus"])
-                    elif not isinstance(cell, Player):
-                        # Cluster food cells for input to RNN
-                        food_obj = GameObject("food", pos, cell.area(), cell.perimeter(), 1.0, 1, bounds)
-                        ImageProcessing.cluster_or_add(food_obj, food_objs, "food", max_cluster_counts["food"], cluster_by["food"], cluster_distances["food"])
+                    # Cluster food cells for input to RNN
+                    food_obj = GameObject("food", pos, cell.area(), cell.perimeter(), 1.0, 1, bounds)
+                    ImageProcessing.cluster_or_add(food_obj, food_objs, "food", max_cluster_counts["food"], cluster_by["food"], cluster_distances["food"])
+
+                for virus in model.viruses:
+                    if virus is None:
+                        continue
+                    pos = Vector(virus.pos[0], virus.pos[1])
+                    top_left = Vector(pos.x - virus.radius, pos.y + virus.radius)
+                    bottom_right = Vector(pos.x + virus.radius, pos.y - virus.radius)
+                    bounds = (top_left, bottom_right)
+                    # Cluster viruses to be input to RNN
+                    virus_obj = GameObject("virus", pos, virus.area(), virus.perimeter(), 0.9, 1, bounds)
+                    ImageProcessing.cluster_or_add(virus_obj, virus_objs, "virus", max_cluster_counts["virus"], cluster_by["virus"], cluster_distances["virus"])
 
                 for player in players:
+                    if not player.alive:
+                        continue
                     for part in player.parts:
                         pos = Vector(part.pos[0], part.pos[1])
                         top_left = Vector(pos.x - part.radius, pos.y + part.radius)
@@ -213,22 +224,17 @@ class AgarioSimulation:
                     prev_target_pos[i] = target_pos
                     players[i].score()
 
-                    if not view.target_player.alive:
-                        view.target_player = players[i]
+                    #if not view.target_player.alive:
+                    #    view.target_player = players[i]
 
                 last_agent_run_time = time.time()
 
                 if agents_alive <= 1:
                     break
 
-            # Maintain virus and food counts
-            if model.num_viruses < self.virus_count:
-                model.spawn_viruses(self.virus_count - model.num_viruses)
-            if model.num_cells < self.food_count:
-                model.spawn_cells(self.food_count - model.num_cells)
+                #view.redraw()
 
             model.update()
-            view.redraw()
             time.sleep(spf)
 
         fitnesses = []
@@ -267,7 +273,7 @@ def main():
     players.append(player)
 
     model = Model(players, bounds=bounds)
-    model.spawn_cells(args.cells)
+    model.spawn_cells(args.food)
     model.spawn_viruses(args.viruses)
 
     # Start view loop (handles input: mouse to move, W to shoot, SPACE to split)

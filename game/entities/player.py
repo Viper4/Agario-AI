@@ -15,12 +15,9 @@ class Player(interfaces.Victim, interfaces.Killer):
     START_SIZE = 20
     BORDER_WIDTH = 5
 
-    LAST_ID = -1
-
     MAX_PARTS = 16
 
     def __init__(self, nick, player_cell):
-        self.id = self.new_id()
         self.nick = nick
         # cells of which player consists
         self.parts = [player_cell]
@@ -32,10 +29,10 @@ class Player(interfaces.Victim, interfaces.Killer):
         self.start_time = time.time()
         self.alive = True
 
-    def move(self):
+    def move(self, sim_speed):
         """Move each part of player and check parts for collision."""
         for i, cell in enumerate(self.parts):
-            cell.move()
+            cell.move(sim_speed)
             for another_cell in self.parts[i + 1:]:
                 # cells shoud intersects and not be the same
                 if cell == another_cell or not cell.is_intersects(another_cell):
@@ -154,11 +151,6 @@ class Player(interfaces.Victim, interfaces.Killer):
             if killed_cell:
                 return killed_cell
         return None
-
-    @classmethod
-    def new_id(cls):
-        cls.LAST_ID += 1
-        return cls.LAST_ID
 
     def remove_part(self, cell):
         """Removes passed player cell from player parts list."""

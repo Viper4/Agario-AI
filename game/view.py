@@ -67,8 +67,16 @@ class View():
         self.screen.fill(View.BACKGROUND_COLOR)
         self.draw_grid()
         for cell in self.model.cells:
+            if cell is None:
+                continue
             self.draw_cell(cell)
+        for virus in self.model.viruses:
+            if virus is None:
+                continue
+            self.draw_cell(virus)
         for player in self.model.players:
+            if player is None:
+                continue
             self.draw_player(player)
         # self.draw_object(self.model.player)
         self.draw_hud((8, 5))
@@ -157,8 +165,13 @@ class View():
         # draw leaderboard HUD item
         lines = list()
         lines.append('Leaderboard')
+        to_sort = []
+        for player in self.model.players:
+            if player is None:
+                continue
+            to_sort.append(player)
         top10 = sorted(
-            self.model.players,
+            to_sort,
             key=lambda pl: pl.score(),
             reverse=True)[:10]
         for i, player in enumerate(top10):

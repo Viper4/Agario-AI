@@ -1,3 +1,5 @@
+import os.path
+
 import torch
 import numpy as np
 import random
@@ -11,7 +13,7 @@ from tqdm import tqdm
 
 
 # Function needs to be picklable so keep it out of classes
-def run_simulation_worker(cluster_settings: dict, simulation_speed: float, duration: float, agent_snapshots: list[dict], pickled_data: bytes):
+def run_simulation_worker(cluster_settings: dict, fps: int, simulation_speed: float, duration: float, agent_snapshots: list[dict], pickled_data: bytes):
     hyperparameters, fitness_weights = pickle.loads(pickled_data)
     agents = []
     for agent_snapshot in agent_snapshots:
@@ -19,8 +21,8 @@ def run_simulation_worker(cluster_settings: dict, simulation_speed: float, durat
         agent = RNNAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))  # CPU only for multiprocessing
         agent.rnn.load_state_dict(agent_snapshot)  # Load agent parameters from snapshot
         agents.append(agent)
-    sim = agario_simulation.AgarioSimulation(900, 600, 1500, 500, 20, agents)
-    return sim.run_headless(cluster_settings, simulation_speed, duration)
+    sim = agario_simulation.AgarioSimulation(900, 600, 2000, 850, 25, agents)
+    return sim.run_headless(cluster_settings, fps, simulation_speed, duration)
 
 
 class GeneticTrainer:
@@ -31,12 +33,28 @@ class GeneticTrainer:
         self.max_generations = max_generations
         self.population = []
 
-    def init_agents(self):
+    def init_agents(self, load_from_file: bool):
         """
-        Initializes the population of agents with randomized parameters
+        Initializes the population of agents with randomized parameters.
+        :param load_from_file: Whether to load the population from file
         :return:
         """
-        for i in range(self.population_size):
+        if load_from_file and os.path.exists("agent_snapshots.pkl"):
+            print("Loading population from file...")
+            with open("agent_snapshots.pkl", "rb") as f:
+                agent_snapshots = pickle.load(f)
+                for agent_snapshot in agent_snapshots:
+                    agent = RNNAgent(self.hyperparameters, fitness_weights=self.fitness_weights,
+                                     randomize_params=False, device=torch.device("cpu"))
+                    agent.rnn.load_state_dict(agent_snapshot)
+                    self.population.append(agent)
+
+            # Remove extras
+            if len(self.population) > self.population_size:
+                self.population = self.population[:self.population_size]
+
+        # Fill remaining agents with randomized agents
+        for i in range(self.population_size - len(self.population)):
             self.population.append(RNNAgent(self.hyperparameters, fitness_weights=self.fitness_weights,
                                             randomize_params=True, device=torch.device("cpu")))
 
@@ -67,18 +85,19 @@ class GeneticTrainer:
                 )
 
             child.mutate()
-            child.reduce_sigma(0.9)  # Reduce mutation strength
+            #child.reduce_sigma(0.95)  # Reduce mutation strength
             children.append(child)
         return children
 
-    def train(self, num_simulations: int):
+    def train(self, load_from_file: bool, num_simulations: int):
         """
         Starts the training loop
+        :param load_from_file: Whether to load the population from file.
         :param num_simulations: Number of simulations to run per generation.
         :return: Final population
         """
         generation = 0
-        self.init_agents()
+        self.init_agents(load_from_file)
 
         with open("cluster_settings.json") as f:
             cluster_settings = json.load(f)
@@ -93,7 +112,7 @@ class GeneticTrainer:
                 for i in range(self.population_size):
                     total_sim_fitnesses[i] += sim_fitnesses[i]'''
 
-            # Run simulations in parallel, one process per simulation
+            # Run simulations in parallel, one worker per simulation
             # Prepare state dicts of agents
             agent_snapshots = [agent.rnn.state_dict() for agent in self.population]
             pickled_data = pickle.dumps((self.hyperparameters, self.fitness_weights))
@@ -104,7 +123,7 @@ class GeneticTrainer:
                 for i in range(num_simulations):
                     jobs.append(pool.apply_async(
                         run_simulation_worker,
-                        args=(cluster_settings, 3.0, 240, agent_snapshots, pickled_data,)
+                        args=(cluster_settings, 120, 5.0, 240, agent_snapshots, pickled_data,)
                     ))
 
                 pool.close()  # no more tasks
@@ -115,12 +134,12 @@ class GeneticTrainer:
                         for i in range(self.population_size):
                             total_sim_fitnesses[i] += sim_fitnesses[i]
                     except TimeoutError:
-                        # job still running, loop back to allow keyboardinterrupt checking
+                        # job still running, loop back to allow keyboard interrupt checking
                         continue
 
                 pool.join()
             except KeyboardInterrupt:
-                print("\n[!] Ctrl-C caught in parent: terminating pool...")
+                print("\nCtrl-C caught: terminating pool...")
                 pool.terminate()  # force kill workers
                 pool.join()
                 sys.exit(1)
@@ -141,6 +160,11 @@ class GeneticTrainer:
             for i in range(self.population_size):
                 print(f"{i}\t\t|\t\t{repr(self.population[i].fitness)}")
             print("-" * 40)
+
+            # Save agent parameters to file
+            with open("agent_snapshots.pkl", "wb") as f:
+                agent_snapshots = [agent.rnn.state_dict() for agent in self.population]
+                pickle.dump(agent_snapshots, f)
 
             # Create new population
             new_population = []
@@ -170,6 +194,10 @@ class GeneticTrainer:
                     children = self.reproduce(parent1, parent2, 1)
                     new_population.extend(children)
 
+            # Elitism
+            num_elites = self.population_size // 20
+            new_population[-num_elites:] = self.population[:num_elites]
+
             self.population = new_population
             generation += 1
         return self.population
@@ -180,15 +208,15 @@ if __name__ == "__main__":
     hyperparameters = Hyperparameters(input_size=256,
                                       hidden_layers=[64, 32],
                                       output_size=4,
-                                      run_interval=0.2,
-                                      param_mutations={"weight": 0.5, "bias": 0.25},
+                                      run_interval=0.1,
+                                      param_mutations={"weight": 1.0, "bias": 0.25},
                                       move_sensitivity=50.0)
-    fitness_weights = FitnessWeights(food=0.75, time_alive=0.5, cells_eaten=2.0, highest_mass=1.5)
+    fitness_weights = FitnessWeights(food=0, time_alive=0, cells_eaten=1.0, highest_mass=1.0)
 
     trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
                              hyperparameters=hyperparameters,
                              fitness_weights=fitness_weights)
-    trainer.train(5)
+    trainer.train(True, 5)
 
     '''command = input("Enter command> ")
     if command == "train":

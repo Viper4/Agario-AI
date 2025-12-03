@@ -39,11 +39,11 @@ class PlayerCell(Cell, interfaces.Killer):
         self.decay_timer = self.DECAY_TIME  # Lose 1 radius every x seconds
         self.last_tick_time = time.time()
 
-    def move(self):
+    def move(self, sim_speed):
         """Update cell state and move by stored velocity."""
-        self.__tick()
+        self.__tick(sim_speed)
         self.__add_area(self.__area_pool_give_out())
-        super().move()
+        super().move(sim_speed)
 
     def eat(self, cell, num_parts, max_parts):
         """Increase current cell area with passed cell area,
@@ -56,10 +56,10 @@ class PlayerCell(Cell, interfaces.Killer):
             self.area_pool += cell.area()
         self.__add_area(self.__area_pool_give_out())
 
-    def __tick(self):
+    def __tick(self, sim_speed):
         """Make updates over time."""
         now = time.time()
-        dt = (now - self.last_tick_time) * self.time_scale
+        dt = (now - self.last_tick_time) * self.time_scale * sim_speed
         self.last_tick_time = now
         # Count down split timer
         if self.split_timeout > 0:
