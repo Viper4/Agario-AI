@@ -14,9 +14,14 @@ class Circle():
         diff = tuple(map(sub, self.pos, circle.pos))
         return math.hypot(*diff)
 
+    def sqr_distance_to(self, circle):
+        """Returns square distance to passed circle."""
+        return (self.pos[0] - circle.pos[0])**2 + (self.pos[1] - circle.pos[1])**2
+
     def is_intersects(self, circle):
         """Returns True if circles intersects, otherwise False."""
-        if self.distance_to(circle) < self.radius + circle.radius:
+        threshold = self.radius + circle.radius
+        if self.sqr_distance_to(circle) < threshold * threshold:
             return True
         return False
 

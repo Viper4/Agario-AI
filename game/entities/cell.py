@@ -59,7 +59,8 @@ class Cell(Circle, Victim):
     def try_to_kill_by(self, killer):
         """Check is killer cell could eat current cell."""
         # Must be ~82% mass of killer to be eaten
-        if self.mass() < killer.mass() * 0.82 and self.distance_to(killer) <= killer.radius - self.radius:
+        threshold = killer.radius - self.radius
+        if self.mass() < killer.mass() * 0.82 and self.sqr_distance_to(killer) <= threshold * threshold:
             return self
         return None
 

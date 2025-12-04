@@ -68,15 +68,17 @@ class Model:
         x, y = self._chunk_coords(pos)
         return self.chunks[x][y]
 
-    def _overlap_chunks(self, pos, radius):
-        """Yield all chunks whose bounding boxes intersect the radius at pos."""
-        px, py = pos
-
-        # Compute the bounds of the vision circle's bounding box
-        min_x = px - radius
-        max_x = px + radius
-        min_y = py - radius
-        max_y = py + radius
+    def _overlap_chunks(self, cells: list):
+        """Yield all chunks whose bounding boxes intersect the given cells."""
+        min_x = 10000000
+        max_x = -10000000
+        min_y = 10000000
+        max_y = -10000000
+        for cell in cells:
+            min_x = min(min_x, cell.pos[0] - cell.radius)
+            max_x = max(max_x, cell.pos[0] + cell.radius)
+            min_y = min(min_y, cell.pos[1] - cell.radius)
+            max_y = max(max_y, cell.pos[1] + cell.radius)
 
         # Convert world bounds to chunk coordinates
         start_cx, start_cy = self._chunk_coords((min_x, min_y))
@@ -87,12 +89,8 @@ class Model:
             for cy in range(start_cy, end_cy + 1):
                 yield self.chunks[cx][cy]
 
-    def get_overlap_chunks(self, pos, radius):
-        return list(self._overlap_chunks(pos, radius))
-
-    def get_overlap_chunks_player(self, player):
-        for part in player.parts:
-            yield from self._overlap_chunks(part.pos, part.radius)
+    def get_overlap_chunks(self, cells):
+        return list(self._overlap_chunks(cells))
 
     # ---------------------------------------------------------------------
     # Bounding helpers
@@ -140,6 +138,8 @@ class Model:
         if cell in chunk.cells:
             chunk.cells.remove(cell)
             self.num_cells -= 1
+        else:
+            print("Cell not found in chunk")
 
     def add_virus(self, virus):
         self._chunk(virus.pos).viruses.add(virus)
@@ -147,7 +147,7 @@ class Model:
 
     def remove_virus(self, virus):
         chunk = self._chunk(virus.pos)
-        if virus in chunk.cells:
+        if virus in chunk.viruses:
             chunk.viruses.remove(virus)
             self.num_viruses -= 1
 
@@ -176,8 +176,6 @@ class Model:
         """Advance game world by one tick."""
         # ---------- Update cells ----------
         for cell in self.cells:
-            if cell is None:
-                continue
             chunk = self._chunk(cell.pos)
 
             cell.move()
@@ -190,8 +188,6 @@ class Model:
 
         # ---------- Update viruses ----------
         for virus in self.viruses:
-            if virus is None:
-                continue
             chunk = self._chunk(virus.pos)
 
             virus.move()
@@ -199,11 +195,11 @@ class Model:
 
             new_chunk = self._chunk(virus.pos)
             if new_chunk is not chunk:
-                chunk.cells.remove(virus)
-                new_chunk.cells.add(virus)
+                chunk.viruses.remove(virus)
+                new_chunk.viruses.add(virus)
 
             nearby_cells = []
-            for nc in self._overlap_chunks(virus.pos, virus.radius):
+            for nc in self._overlap_chunks([virus]):
                 nearby_cells.extend(nc.cells)
 
             # Eat ejected cells
@@ -219,8 +215,6 @@ class Model:
 
         # ---------- Update players ----------
         for player in self.players:
-            if player is None:
-                continue
             chunk = self._chunk(player.center())
 
             player.move()
@@ -238,7 +232,7 @@ class Model:
             nearby_players = []
             nearby_viruses = []
             # Nearby objects for collisions
-            for nc in self.get_overlap_chunks_player(player):
+            for nc in self._overlap_chunks(player.parts):
                 nearby_cells.extend(nc.cells)
                 nearby_players.extend(nc.players)
                 nearby_viruses.extend(nc.viruses)
@@ -287,9 +281,9 @@ class Model:
     # Client copy (view around a position)
     # ---------------------------------------------------------------------
 
-    def copy_for_client(self, pos):
+    def copy_for_client(self, cell):
         """Return a small model containing only objects near pos."""
-        chunks = list(self._overlap_chunks(pos, self.chunk_size))
+        chunks = list(self._overlap_chunks([cell]))
 
         players = list(itertools.chain.from_iterable(c.players for c in chunks))
         cells = list(itertools.chain.from_iterable(c.cells for c in chunks))

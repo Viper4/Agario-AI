@@ -42,7 +42,7 @@ class View():
 
     DEBUG_COLOR = (255, 0, 0)
 
-    def __init__(self, screen, model, player, debug=False):
+    def __init__(self, screen, model, player, debug=False, fps=60):
         self.screen = screen
         self.width, self.height = self.screen.get_size()
         self.model = model
@@ -54,6 +54,7 @@ class View():
         self.hud_surface = pygame.Surface((1, 1), pygame.SRCALPHA)
         self.hud_surface.fill(View.HUD_BACGROUND_COLOR)
         self.font = pygame.font.Font(pygame.font.get_default_font(), 18)
+        self.fps = fps
 
     def expand_camera(self):
         """Expand camera view bounds as player's cell grows or splits."""
@@ -222,7 +223,7 @@ class View():
             self.model.update_velocity(self.target_player, self.game_mouse_pos())
             self.model.update()
             self.redraw()
-            self.clock.tick(self.model.fps)
+            self.clock.tick(self.fps)
 
     def draw_debug_info(self):
         """Draw debug information on the screen."""
@@ -285,12 +286,12 @@ if __name__ == '__main__':
     bounds = [1000, 1000]
     cell_num = 100
     
-    p = Player.make_random(60, "Jetraid", bounds)
+    p = Player.make_random("Jetraid", bounds)
     p.parts[0].radius = 100
     players = [
-        Player.make_random(60, "Sobaka", bounds),
-        Player.make_random(60, "Kit", bounds),
-        Player.make_random(60, "elohssa", bounds),
+        Player.make_random("Sobaka", bounds),
+        Player.make_random("Kit", bounds),
+        Player.make_random("elohssa", bounds),
         p,
     ]
     m = Model(players, bounds=bounds)

@@ -6,7 +6,7 @@ import threading
 from game.view import View
 from game.new_model import Model
 #from game.model import Model
-from game.entities import Player, Virus, PlayerCell
+from game.entities import Player
 
 
 def game_loop(food_count: int, virus_count: int, model: Model):
@@ -38,12 +38,11 @@ def main():
     bounds = [args.bounds, args.bounds]
 
     # Create player and model
-    fps = 60
-    players = [Player.make_random(fps, f"Husk {i}", bounds) for i in range(5)]
-    player = Player.make_random(fps, args.nick, bounds)
-    #player.parts[0].radius = 100
+    players = [Player.make_random(f"Husk {i}", bounds) for i in range(5)]
+    player = Player.make_random(args.nick, bounds)
+    player.parts[0].radius = 100
     players.append(player)
-    model = Model(players, bounds=bounds, fps=fps, sim_speed=5.0)
+    model = Model(players, bounds=bounds)
     model.spawn_cells(args.food)
     model.spawn_viruses(args.viruses)
 

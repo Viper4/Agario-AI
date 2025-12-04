@@ -33,18 +33,18 @@ class Player(interfaces.Victim, interfaces.Killer):
         """Move each part of player and check parts for collision."""
         for i, cell in enumerate(self.parts):
             cell.move()
-            for another_cell in self.parts[i + 1:]:
+            for part in self.parts[i + 1:]:
                 # cells shoud intersects and not be the same
-                if cell == another_cell or not cell.is_intersects(another_cell):
+                if cell == part or not cell.is_intersects(part):
                     continue
 
                 # merge cells if their timeout is zero
                 # otherwise get rid off colission between them
-                if cell.split_timeout <= 0 and another_cell.split_timeout <= 0:
-                    cell.eat(another_cell, len(self.parts), self.MAX_PARTS)
-                    self.parts.remove(another_cell)
+                if cell.split_timeout <= 0 and part.split_timeout <= 0:
+                    cell.eat(part, len(self.parts), self.MAX_PARTS)
+                    self.parts.remove(part)
                 else:
-                    cell.regurgitate_from(another_cell)
+                    cell.regurgitate_from(part)
 
     def update_velocity(self, target_pos):
         """Update velocity of each part."""
@@ -130,16 +130,16 @@ class Player(interfaces.Victim, interfaces.Killer):
         """Try to kill passed victim by player parts. 
         Returns killed Cell if can and the cell part that killed it, otherwise return None.
         """
-        for cell in self.parts:
-            killed_cell = victim.try_to_kill_by(cell)
+        for part in self.parts:
+            killed_cell = victim.try_to_kill_by(part)
             if killed_cell:
                 # feed player cell with killed cell
-                cell.eat(killed_cell, len(self.parts), self.MAX_PARTS)
+                part.eat(killed_cell, len(self.parts), self.MAX_PARTS)
                 if isinstance(killed_cell, PlayerCell):
                     self.num_players_eaten += 1
                 elif not isinstance(killed_cell, Virus):
                     self.num_food_eaten += 1
-                return killed_cell, cell
+                return killed_cell, part
         return None, None
 
     def try_to_kill_by(self, killer):

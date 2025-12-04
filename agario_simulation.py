@@ -72,7 +72,7 @@ class AgarioSimulation:
 
                     # Get nearby cells
                     center_pos = players[i].center()
-                    chunks = model.get_overlap_chunks_player(players[i])
+                    chunks = model.get_overlap_chunks(players[i].parts)
 
                     score = players[i].score()  # View bounds is expanded based on score
                     half_view_width = (self.base_view_width + score) / 2

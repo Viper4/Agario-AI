@@ -1,5 +1,4 @@
 import math
-import time
 from operator import add, sub
 
 from .. import gameutils as gu
@@ -144,22 +143,25 @@ class PlayerCell(Cell, interfaces.Killer):
         """Pushing current cell to edge of the passed cell.
         It is necessary to get rid of the collision beetwen them.
         """
-        # get vector that connects two centers, to detemine direction
-        centers_vec = list(map(
-            sub,
-            self.pos,
-            cell.pos))
-        # get angle of contact
-        angle = gu.cartesian_to_polar(*centers_vec)[0]
-        # intersection length
-        delta = self.radius + cell.radius - self.distance_to(cell)
-        # get delta in cartesian coordinate system
-        d_xy = gu.polar_to_cartesian(angle, delta)
-        # move current cell outside passed cell
-        self.pos = list(map(
-            add,
-            self.pos,
-            d_xy))
+        # vector between centers
+        dx = self.pos[0] - cell.pos[0]
+        dy = self.pos[1] - cell.pos[1]
+
+        dist2 = dx * dx + dy * dy
+        dist = math.sqrt(dist2)
+
+        # intersection amount
+        delta = self.radius + cell.radius - dist
+        if delta <= 0:
+            return  # no overlap
+
+        # normalize (dx,dy)
+        nx = dx / dist
+        ny = dy / dist
+
+        # push out by delta
+        self.pos[0] += nx * delta
+        self.pos[1] += ny * delta
 
     def area(self):
         """Returns full PlayerCell area, including area stored in pool."""
