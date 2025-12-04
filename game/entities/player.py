@@ -29,10 +29,10 @@ class Player(interfaces.Victim, interfaces.Killer):
         self.start_time = time.time()
         self.alive = True
 
-    def move(self, sim_speed):
+    def move(self):
         """Move each part of player and check parts for collision."""
         for i, cell in enumerate(self.parts):
-            cell.move(sim_speed)
+            cell.move()
             for another_cell in self.parts[i + 1:]:
                 # cells shoud intersects and not be the same
                 if cell == another_cell or not cell.is_intersects(another_cell):
@@ -168,9 +168,9 @@ class Player(interfaces.Victim, interfaces.Killer):
         self.parts[0].radius = self.START_SIZE
 
     @classmethod
-    def make_random(cls, fps, nick, bounds):
+    def make_random(cls, nick, bounds):
         """Returns random player with given nick."""
-        player_cell = PlayerCell.make_random(fps, bounds)
+        player_cell = PlayerCell.make_random(bounds)
         player_cell.radius = cls.START_SIZE
         return cls(nick, player_cell)
 

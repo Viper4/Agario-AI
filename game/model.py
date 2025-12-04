@@ -129,12 +129,12 @@ class Model():
     def spawn_cells(self, amount):
         """Spawn passed amount of cells on the field."""
         for _ in range(amount):
-            self.add_cell(Cell.make_random(self.fps, self.bounds))
+            self.add_cell(Cell.make_random(self.bounds))
 
     def spawn_viruses(self, amount):
         """Spawn a number of viruses on the field."""
         for _ in range(amount):
-            self.add_virus(Virus.make_random(self.fps, self.bounds))
+            self.add_virus(Virus.make_random(self.bounds))
 
     def bound_cell(self, cell):
         cell.pos[0] = self.bounds[0] if cell.pos[0] > self.bounds[0] else cell.pos[0]

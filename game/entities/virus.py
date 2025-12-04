@@ -22,9 +22,9 @@ class Virus(Cell):
 
     SPLIT_RADIUS_THRESHOLD = 65  # Radius threshold for virus to split
 
-    def __init__(self, fps, pos, radius, color=None, angle=0, speed=0):
+    def __init__(self, pos, radius, color=None, angle=0, speed=0):
         color = self.DEFAULT_COLOR if color is None else color
-        super().__init__(fps, pos, radius, color, angle, speed)
+        super().__init__(pos, radius, color, angle, speed)
 
     def try_to_kill_by(self, killer):
         """If a player cell fully engulfs the virus, the virus is considered 'killed'.
@@ -56,11 +56,11 @@ class Virus(Cell):
         # find diff_xy to move spawn virus on current circle border
         diff_xy = gu.polar_to_cartesian(angle, self.radius + radius)
         pos = [self.pos[0] + diff_xy[0], self.pos[1] + diff_xy[1]]
-        return Virus(self.fps, pos, radius, self.color, angle, speed)
+        return Virus(pos, radius, self.color, angle, speed)
 
     @classmethod
-    def make_random(cls, fps, bounds):
+    def make_random(cls, bounds):
         pos = gu.random_pos(bounds)
         radius = random.choices(cls.SIZES, cls.SIZES_CUM)[0]
         color = cls.DEFAULT_COLOR
-        return cls(fps, pos, radius, color)
+        return cls(pos, radius, color)

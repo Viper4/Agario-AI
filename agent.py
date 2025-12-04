@@ -244,13 +244,84 @@ class RNNAgent(BaseAgent):
         :param objects: list of GameObjects for input
         :return: tuple of (move_x, move_y, split, eject)
         """
-        max_input_objects = self.hyperparameters.input_size // 8
+        GRID_WIDTH = 9
+        GRID_HEIGHT = 6
+        CELL_FEATURES = 4  # features per cell
+        TOTAL_INPUTS = GRID_WIDTH * GRID_HEIGHT * CELL_FEATURES
+
+        assert self.hyperparameters.input_size == TOTAL_INPUTS, f"input_size must be {TOTAL_INPUTS} for {GRID_WIDTH}x{GRID_HEIGHT} grid"
+
+        # Create empty grid: shape (GRID_SIZE, GRID_SIZE, 8)
+        grid = torch.zeros((GRID_WIDTH, GRID_HEIGHT, CELL_FEATURES),
+                           device=self.device,
+                           dtype=torch.float32)
+
+        max_food = 0
+        max_virus = 0
+        max_player = 0
+
+        for obj in objects:
+            # Convert pos.x/y in [-1,1] to grid index 0..GRID_SIZE-1
+            gx = int((obj.pos.x + 1) * 0.5 * (GRID_WIDTH - 1))
+            gy = int((obj.pos.y + 1) * 0.5 * (GRID_HEIGHT - 1))
+
+            # Safety clamp (just in case)
+            gx = max(0, min(GRID_WIDTH - 1, gx))
+            gy = max(0, min(GRID_HEIGHT - 1, gy))
+
+            cell = grid[gx, gy]
+
+            # One-hot-ish counts
+            if obj.label == "food":
+                cell[0] += obj.count
+                if cell[0] > max_food:
+                    max_food = cell[0]
+            elif obj.label == "virus":
+                cell[1] += obj.count
+                if cell[1] > max_virus:
+                    max_virus = cell[1]
+            elif obj.label == "player":
+                cell[2] += obj.count
+                if cell[2] > max_player:
+                    max_player = cell[2]
+
+            # Aggregate raw stats (sum for now)
+            cell[3] += obj.area
+
+        # Normalize
+        for gx in range(GRID_WIDTH):
+            for gy in range(GRID_HEIGHT):
+                cell = grid[gx, gy]
+                if max_food != 0:
+                    cell[0] /= max_food
+                if max_virus != 0:
+                    cell[1] /= max_virus
+                if max_player != 0:
+                    cell[2] /= max_player
+
+                cell[3] /= 5000  # Rough estimate for max area
+
+        #print(grid)
+
+        # Flatten grid to shape (1, input_size)
+        x = grid.reshape(1, TOTAL_INPUTS)
+
+        # Feed the RNN: (batch, seq_len=1, features)
+        x = x.unsqueeze(1)
+        output = self.forward(x)
+
+        # Return action values
+        move_x, move_y, split, eject = output[0].detach().cpu().numpy()
+        return float(move_x), float(move_y), float(split), float(eject)
+
+        '''max_input_objects = self.hyperparameters.input_size // 8
 
         # Convert objects list to tensor input for the network
         x = torch.zeros((1, self.hyperparameters.input_size)).to(self.device)
         # 8 input nodes per object
         # The 8 nodes are formatted: (food, virus, player, relative pos x, relative pos y, area, perimeter, count)
         i = 0
+
         while i < max_input_objects and i < len(objects):
             obj = objects[i]
 
@@ -284,7 +355,7 @@ class RNNAgent(BaseAgent):
         move_y = float(arr[1])
         split = float(arr[2])
         eject = float(arr[3])
-        return move_x, move_y, split, eject
+        return move_x, move_y, split, eject'''
 
     def run_web_game(self, visualize: bool):
         """

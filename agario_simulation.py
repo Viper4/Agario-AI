@@ -1,15 +1,11 @@
-import argparse
-import pygame
-import torch
-import json
 import agent
 import time
 import math
-from game.view import View
+from tqdm import tqdm
+from game.opencv_view import OCView
 from game.new_model import Model
 from game.entities import Player
 from geometry_utils import Vector, GameObject
-from image_processing import ImageProcessing
 
 
 class AgarioSimulation:
@@ -21,19 +17,16 @@ class AgarioSimulation:
         self.virus_count = virus_count
         self.agents = agents
 
-    def run_headless(self, cluster_settings: dict, fps: int, simulation_speed: float, duration: float):
+    def run(self, fps: int, simulation_duration: float, headless: bool):
         """
         Runs simulation with only AI agents without drawing the game's visuals.
         Stops when the duration is reached or when only 1 agent is alive.
-        :param cluster_settings: Settings for clustering objects in the game
-        :param fps: Frames per second or number of model updates per second
-        :param simulation_speed: Number of times faster the simulation runs
-        :param duration: Duration of the simulation until termination in seconds
+        :param fps: Frames per second for a game at normal speed.
+        :param simulation_duration: How long the simulation runs in seconds. Doesn't mean termination will occur at this time.
+        :param headless: Whether to draw the game's visuals.
         :return: List of fitness values for each agent
         """
-        spf = 1 / fps
-        time_scale = 1 / simulation_speed
-        scaled_duration = duration * time_scale
+        num_frames = int(simulation_duration * fps)  # Number of iterations to run the simulation for
 
         bounds = [self.bounds, self.bounds]
 
@@ -41,167 +34,95 @@ class AgarioSimulation:
         prev_target_pos = []
 
         for i in range(len(self.agents)):
-            ai_player = Player.make_random(fps, f"Agent {i}", bounds)
+            ai_player = Player.make_random(f"Agent {i}", bounds)
             players.append(ai_player)
 
             prev_target_pos.append(players[i].center())
 
-        model = Model(players, bounds=bounds, fps=fps, sim_speed=simulation_speed)
+        model = Model(players, bounds=bounds, chunk_size=500)
         model.spawn_cells(self.food_count)
         model.spawn_viruses(self.virus_count)
 
-        #pygame.init()
-        #screen = pygame.display.set_mode((self.base_view_width, self.base_view_height))
-        #pygame.display.set_caption('Agar.io AI Simulation')
-        #view = View(screen, model, players[0], debug=False)
-
-        # Clustering for each cell type to reduce input size to our RNNs
-        # The way the JSON settings are set up is stupid but it's what works best with object recognition
-        max_cluster_counts = {
-            "virus": cluster_settings["virus"]["max_count"],
-            "player": cluster_settings["unknown"]["variants"]["player"]["max_count"],
-            "food": cluster_settings["unknown"]["variants"]["food"]["max_count"]
-        }
-        cluster_by = {
-            "virus": cluster_settings["virus"]["cluster_by"],
-            "player": cluster_settings["unknown"]["variants"]["player"]["cluster_by"],
-            "food": cluster_settings["unknown"]["variants"]["food"]["cluster_by"]
-        }
-        cluster_distances = {
-            "virus": cluster_settings["virus"]["cluster_distance"],
-            "player": cluster_settings["unknown"]["variants"]["player"]["cluster_distance"],
-            "food": cluster_settings["unknown"]["variants"]["food"]["cluster_distance"]
-        }
+        view = OCView(self.base_view_width, self.base_view_height, model, players[0], debug=False)
 
         start_time = time.time()
-        last_agent_run_time = -100000
-        while True:
-            if time.time() - start_time >= scaled_duration:
-                break
-
-            num_viruses = model.virus_count()
-            num_cells = model.cell_count()
+        last_agent_run_frame = -100
+        for frame in tqdm(range(num_frames), desc="Running simulation", unit="frames"):
             # Maintain virus and food counts
-            if num_viruses < self.virus_count:
-                model.spawn_viruses(self.virus_count - num_viruses)
-            if num_cells < self.food_count:
-                model.spawn_cells(self.food_count - num_cells)
+            if model.num_viruses < self.virus_count:
+                model.spawn_viruses(self.virus_count - model.num_viruses)
+            if model.num_cells < self.food_count:
+                model.spawn_cells(self.food_count - model.num_cells)
 
-            run_agent = time.time() - last_agent_run_time >= self.agents[0].run_interval * time_scale
+            run_agent = frame - last_agent_run_frame >= self.agents[0].run_interval * fps
 
-            if run_agent:
-                # Lists of objects we'll use as input to the RNNs
-                virus_objs = []
-                player_objs = []
-                food_objs = []
-
-                for cell in model.cells:
-                    if cell is None:
-                        continue
-                    pos = Vector(cell.pos[0], cell.pos[1])
-                    top_left = Vector(pos.x - cell.radius, pos.y + cell.radius)
-                    bottom_right = Vector(pos.x + cell.radius, pos.y - cell.radius)
-                    bounds = (top_left, bottom_right)
-                    # Cluster food cells for input to RNN
-                    food_obj = GameObject("food", pos, cell.area(), cell.perimeter(), 1.0, 1, bounds)
-                    ImageProcessing.cluster_or_add(food_obj, food_objs, "food", max_cluster_counts["food"], cluster_by["food"], cluster_distances["food"])
-
-                for virus in model.viruses:
-                    if virus is None:
-                        continue
-                    pos = Vector(virus.pos[0], virus.pos[1])
-                    top_left = Vector(pos.x - virus.radius, pos.y + virus.radius)
-                    bottom_right = Vector(pos.x + virus.radius, pos.y - virus.radius)
-                    bounds = (top_left, bottom_right)
-                    # Cluster viruses to be input to RNN
-                    virus_obj = GameObject("virus", pos, virus.area(), virus.perimeter(), 0.9, 1, bounds)
-                    ImageProcessing.cluster_or_add(virus_obj, virus_objs, "virus", max_cluster_counts["virus"], cluster_by["virus"], cluster_distances["virus"])
-
-                for player in players:
-                    if not player.alive:
-                        continue
-                    for part in player.parts:
-                        pos = Vector(part.pos[0], part.pos[1])
-                        top_left = Vector(pos.x - part.radius, pos.y + part.radius)
-                        bottom_right = Vector(pos.x + part.radius, pos.y - part.radius)
-                        bounds = (top_left, bottom_right)
-                        # Cluster players to be input to RNN
-                        player_obj = GameObject("player", pos, part.area(), part.perimeter(), 1.0, 1, bounds)
-                        ImageProcessing.cluster_or_add(player_obj, player_objs, "player", max_cluster_counts["player"], cluster_by["player"], cluster_distances["player"])
-
-                # Execute AI actions
+            if not run_agent:
+                # Maintain agent's previous target position
+                for i in range(len(players)):
+                    if players[i].alive:
+                        model.update_velocity(players[i], prev_target_pos[i])
+            else:
+                # Execute new AI actions
                 agents_alive = 0
                 for i in range(len(self.agents)):
                     if not players[i].alive:
                         continue
-                    agents_alive += 1
-                    # Generate inputs given the viewing bounds of the agent's player center
-                    center = players[i].center()
-                    score = players[i].score()  # View bounds is expanded based on score
-                    center_pos = Vector(center[0], center[1])
-                    objects_in_view = []
 
+                    agents_alive += 1
+
+                    # Get nearby cells
+                    center_pos = players[i].center()
+                    chunks = model.get_overlap_chunks_player(players[i])
+
+                    score = players[i].score()  # View bounds is expanded based on score
                     half_view_width = (self.base_view_width + score) / 2
                     half_view_height = (self.base_view_height + score) / 2
                     # Bounds is top left corner and bottom right corner
-                    view_bounds = (Vector(center_pos.x - half_view_width, center_pos.y + half_view_height),
-                                   Vector(center_pos.x + half_view_width, center_pos.y - half_view_height))
+                    view_bounds = ((center_pos[0] - half_view_width, center_pos[1] + half_view_height),
+                                   (center_pos[0] + half_view_width, center_pos[1] - half_view_height))
+                    objects_in_view = []
 
-                    # Update object position to relative position
-                    # Also normalize all inputs to be passed into the RNN
-                    for virus_obj in virus_objs:
-                        if virus_obj.check_visible(view_bounds):
-                            visible_obj = virus_obj.copy()
-
-                            # Normalize position to relative pos from [-1, 1] within view bounds
-                            visible_obj.pos -= center_pos  # relative position
-                            visible_obj.pos.x /= half_view_width
-                            visible_obj.pos.y /= half_view_height
-
-                            # Normalize area and perimeter
-                            visible_obj.area /= 100000  # Good enough max area estimate
-                            visible_obj.perimeter /= 1000  # Good enough max perimeter estimate
-
-                            # Normalize count
-                            visible_obj.count /= max_cluster_counts["virus"]
-
-                            objects_in_view.append(visible_obj)
-
-                    for player_obj in player_objs:
-                        if player_obj.check_visible(view_bounds):
-                            visible_obj = player_obj.copy()
-
-                            # Normalize position to relative pos from [-1, 1] within view bounds
-                            visible_obj.pos -= center_pos  # relative position
-                            visible_obj.pos.x /= half_view_width
-                            visible_obj.pos.y /= half_view_height
-
-                            # Normalize area and perimeter
-                            visible_obj.area /= 100000  # Good enough max area estimate
-                            visible_obj.perimeter /= 1000  # Good enough max perimeter estimate
-
-                            # Normalize count
-                            visible_obj.count /= max_cluster_counts["player"]
-
-                            objects_in_view.append(visible_obj)
-
-                    for food_obj in food_objs:
-                        if food_obj.check_visible(view_bounds):
-                            visible_obj = food_obj.copy()
-
-                            # Normalize position to relative pos from [-1, 1] within view bounds
-                            visible_obj.pos -= center_pos  # relative position
-                            visible_obj.pos.x /= half_view_width
-                            visible_obj.pos.y /= half_view_height
-
-                            # Normalize area and perimeter
-                            visible_obj.area /= 10000  # Good enough max area estimate
-                            visible_obj.perimeter /= 1000  # Good enough max perimeter estimate
-
-                            # Normalize count
-                            visible_obj.count /= max_cluster_counts["food"]
-
-                            objects_in_view.append(visible_obj)
+                    for chunk in chunks:
+                        for cell in chunk.cells:
+                            if cell.within_bounds(view_bounds):
+                                # Prepare object for network input
+                                normalized_pos = Vector((cell.pos[0] - center_pos[0]) / half_view_width,
+                                                        (cell.pos[1] - center_pos[1]) / half_view_height)
+                                obj = GameObject("food",
+                                                 normalized_pos,
+                                                 cell.area(),
+                                                 cell.perimeter(),
+                                                 1.0,
+                                                 1,
+                                                 (Vector(0, 0), Vector(0, 0)))
+                                objects_in_view.append(obj)
+                        for player in chunk.players:
+                            for part in player.parts:
+                                if part.within_bounds(view_bounds):
+                                    # Prepare object for network input
+                                    normalized_pos = Vector((part.pos[0] - center_pos[0]) / half_view_width,
+                                                            (part.pos[1] - center_pos[1]) / half_view_height)
+                                    obj = GameObject("player",
+                                                     normalized_pos,
+                                                     part.area(),
+                                                     part.perimeter(),
+                                                     1.0,
+                                                     1,
+                                                     (Vector(0, 0), Vector(0, 0)))
+                                    objects_in_view.append(obj)
+                        for virus in chunk.viruses:
+                            if virus.within_bounds(view_bounds):
+                                # Prepare object for network input
+                                normalized_pos = Vector((virus.pos[0] - center_pos[0]) / half_view_width,
+                                                        (virus.pos[1] - center_pos[1]) / half_view_height)
+                                obj = GameObject("virus",
+                                                 normalized_pos,
+                                                 virus.area(),
+                                                 virus.perimeter(),
+                                                 1.0,
+                                                 1,
+                                                 (Vector(0, 0), Vector(0, 0)))
+                                objects_in_view.append(obj)
 
                     move_x, move_y, split, eject = self.agents[i].get_action(objects_in_view)
                     agent_pos = players[i].center()
@@ -222,20 +143,15 @@ class AgarioSimulation:
                         players[i].shoot(target_pos)
                     model.update_velocity(players[i], target_pos)
                     prev_target_pos[i] = target_pos
-                    players[i].score()
 
-                    #if not view.target_player.alive:
-                    #    view.target_player = players[i]
-
-                last_agent_run_time = time.time()
+                last_agent_run_frame = frame
 
                 if agents_alive <= 1:
                     break
 
-                #view.redraw()
-
             model.update()
-            time.sleep(spf)
+            if not headless and frame % 60 == 0:
+                view.redraw()
 
         fitnesses = []
         for i in range(len(self.agents)):
@@ -248,7 +164,7 @@ class AgarioSimulation:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Offline AI Agar.io Game")
+    '''parser = argparse.ArgumentParser(description="Offline AI Agar.io Game")
     parser.add_argument('-wt', '--width', dest='width', type=int, default=900, help='screen width')
     parser.add_argument('-ht', '--height', dest='height', type=int, default=600, help='screen height')
     parser.add_argument('-b', '--bounds', dest='bounds', type=int, default=1500, help='half-size of world bounds (world is [-b,b] x [-b,b])')
@@ -281,7 +197,8 @@ def main():
     ai_agent = agent.RNNAgent(None, None, False, torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     with open("cluster_settings.json") as f:
-        cluster_settings = json.load(f)
+        cluster_settings = json.load(f)'''
+    pass
 
 
 if __name__ == '__main__':

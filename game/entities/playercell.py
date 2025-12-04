@@ -27,23 +27,23 @@ class PlayerCell(Cell, interfaces.Killer):
     # the time before a сell can merge with another cell in seconds
     SPLIT_TIMEOUT = 30
 
-    DECAY_TIME = 5.0
+    DECAY_TIME = 5
     MIN_RADIUS = 20
 
-    def __init__(self, fps, pos, radius, color, angle=0, speed=0):
-        super().__init__(fps, pos, radius, color, angle, speed)
+    def __init__(self, pos, radius, color, angle=0, speed=0):
+        super().__init__(pos, radius, color, angle, speed)
         # merge_time = 30 + cell mass * 2.33%
         self.split_timeout = self.SPLIT_TIMEOUT + int(self.mass() * 0.0233)
+        self.split_timeout *= 60  # Convert to number of frames in normal 60 FPS
         # food storage, to make the radius change smooth
         self.area_pool = 0
-        self.decay_timer = self.DECAY_TIME  # Lose 1 radius every x seconds
-        self.last_tick_time = time.time()
+        self.decay_timer = self.DECAY_TIME * 60  # Lose 1 radius every x*60 frames
 
-    def move(self, sim_speed):
+    def move(self):
         """Update cell state and move by stored velocity."""
-        self.__tick(sim_speed)
+        self.__tick()
         self.__add_area(self.__area_pool_give_out())
-        super().move(sim_speed)
+        super().move()
 
     def eat(self, cell, num_parts, max_parts):
         """Increase current cell area with passed cell area,
@@ -56,20 +56,17 @@ class PlayerCell(Cell, interfaces.Killer):
             self.area_pool += cell.area()
         self.__add_area(self.__area_pool_give_out())
 
-    def __tick(self, sim_speed):
+    def __tick(self):
         """Make updates over time."""
-        now = time.time()
-        dt = (now - self.last_tick_time) * self.time_scale * sim_speed
-        self.last_tick_time = now
         # Count down split timer
         if self.split_timeout > 0:
-            self.split_timeout -= dt
+            self.split_timeout -= 1
 
         # Decay mass
+        self.decay_timer -= 1
         if self.radius > self.MIN_RADIUS and self.decay_timer <= 0:
             self.radius -= 1
-            self.decay_timer = self.DECAY_TIME
-        self.decay_timer -= dt
+            self.decay_timer = self.DECAY_TIME * 60
 
     def __add_area(self, area):
         """Increase current cell area with passed area."""
@@ -100,7 +97,6 @@ class PlayerCell(Cell, interfaces.Killer):
         """
         # create emmited object at pos [0, 0]
         obj = ObjClass(
-            self.fps,
             [0, 0], radius, 
             self.color, 
             angle, speed)

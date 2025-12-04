@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 
 # Function needs to be picklable so keep it out of classes
-def run_simulation_worker(cluster_settings: dict, fps: int, simulation_speed: float, duration: float, agent_snapshots: list[dict], pickled_data: bytes):
+def run_simulation_worker(fps: int, simulation_duration: float, agent_snapshots: list[dict], pickled_data: bytes):
     hyperparameters, fitness_weights = pickle.loads(pickled_data)
     agents = []
     for agent_snapshot in agent_snapshots:
@@ -21,8 +21,8 @@ def run_simulation_worker(cluster_settings: dict, fps: int, simulation_speed: fl
         agent = RNNAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))  # CPU only for multiprocessing
         agent.rnn.load_state_dict(agent_snapshot)  # Load agent parameters from snapshot
         agents.append(agent)
-    sim = agario_simulation.AgarioSimulation(900, 600, 2000, 850, 25, agents)
-    return sim.run_headless(cluster_settings, fps, simulation_speed, duration)
+    sim = agario_simulation.AgarioSimulation(900, 600, 1500, 600, 20, agents)
+    return sim.run(fps, simulation_duration, True)
 
 
 class GeneticTrainer:
@@ -85,7 +85,7 @@ class GeneticTrainer:
                 )
 
             child.mutate()
-            #child.reduce_sigma(0.95)  # Reduce mutation strength
+            child.reduce_sigma(0.95)  # Reduce mutation strength
             children.append(child)
         return children
 
@@ -105,13 +105,6 @@ class GeneticTrainer:
         while self.max_generations is None or generation < self.max_generations:
             total_sim_fitnesses = [0.0] * self.population_size  # Element at i = total fitness of agent i over all simulations
 
-            # Run simulations in sequence
-            '''simulation = agario_simulation.AgarioSimulation(900, 600, 2000, 500, 20, self.population)
-            for _ in tqdm(range(num_simulations), desc=f"Generation {generation}", total=num_simulations):
-                sim_fitnesses = simulation.run_headless(cluster_settings, 2.0, 240)
-                for i in range(self.population_size):
-                    total_sim_fitnesses[i] += sim_fitnesses[i]'''
-
             # Run simulations in parallel, one worker per simulation
             # Prepare state dicts of agents
             agent_snapshots = [agent.rnn.state_dict() for agent in self.population]
@@ -123,12 +116,12 @@ class GeneticTrainer:
                 for i in range(num_simulations):
                     jobs.append(pool.apply_async(
                         run_simulation_worker,
-                        args=(cluster_settings, 120, 5.0, 240, agent_snapshots, pickled_data,)
+                        args=(60, 240, agent_snapshots, pickled_data,)
                     ))
 
                 pool.close()  # no more tasks
                 # Wait for all jobs to finish and collect fitness
-                for job in tqdm(jobs, desc=f"Generation {generation}", total=num_simulations):
+                for job in tqdm(jobs, desc=f"Generation {generation}", total=num_simulations, unit="sims"):
                     try:
                         sim_fitnesses = job.get()
                         for i in range(self.population_size):
@@ -205,8 +198,8 @@ class GeneticTrainer:
 
 if __name__ == "__main__":
     # Max number of objects on screen at a time reaches ~50 so define fixed input of 32 objects with 8 nodes per object
-    hyperparameters = Hyperparameters(input_size=256,
-                                      hidden_layers=[64, 32],
+    hyperparameters = Hyperparameters(input_size=9*6*4,  # 9x6 grid of 4 nodes for food_count, virus_count, player_count, area_sum
+                                      hidden_layers=[64, 16],
                                       output_size=4,
                                       run_interval=0.1,
                                       param_mutations={"weight": 1.0, "bias": 0.25},
