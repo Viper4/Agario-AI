@@ -1,4 +1,5 @@
 import math
+import random
 from operator import add, sub
 
 from .. import gameutils as gu
@@ -156,6 +157,11 @@ class PlayerCell(Cell, interfaces.Killer):
             return  # no overlap
 
         # normalize (dx,dy)
+        if dist == 0:
+            # if cells are on the same point, push cell in random direction
+            self.pos[0] += random.uniform(-1, 1)
+            self.pos[1] += random.uniform(-1, 1)
+            return
         nx = dx / dist
         ny = dy / dist
 

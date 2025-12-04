@@ -202,7 +202,7 @@ if __name__ == "__main__":
                                       hidden_layers=[64, 16],
                                       output_size=4,
                                       run_interval=0.1,
-                                      param_mutations={"weight": 1.0, "bias": 0.25},
+                                      param_mutations={"weight": 2.0, "bias": 0.5},
                                       move_sensitivity=50.0)
     fitness_weights = FitnessWeights(food=0, time_alive=0, cells_eaten=1.0, highest_mass=1.0)
 
