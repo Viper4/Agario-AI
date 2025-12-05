@@ -42,7 +42,7 @@ def main():
     player = Player.make_random(args.nick, bounds)
     player.parts[0].radius = 100
     players.append(player)
-    model = Model(players, bounds=bounds)
+    model = Model(players, bounds=bounds, chunk_size=100)
     model.spawn_cells(args.food)
     model.spawn_viruses(args.viruses)
 

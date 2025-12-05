@@ -9,21 +9,25 @@ import torch
 
 
 class Hyperparameters:
-    def __init__(self, input_size: int, hidden_layers: list[int], output_size: int, run_interval: float, param_mutations: dict, move_sensitivity: float):
-        self.input_size = input_size
+    def __init__(self, hidden_layers: list[int], output_size: int, run_interval: float, param_mutations: dict, move_sensitivity: float, grid_width: int, grid_height: int):
         self.hidden_layers = hidden_layers  # Defines number of hidden nodes at layer i
         self.output_size = output_size
         self.run_interval = run_interval  # Time between actions in seconds
         self.param_mutations = param_mutations  # Dict holding param mutation standard deviations Ex: {"weight": 0.5, "bias": 0.1}
         self.move_sensitivity = move_sensitivity  # Factor to multiply the move output vector by
+        self.grid_width = grid_width  # How many cells wide the vision grid is
+        self.grid_height = grid_height  # How many cells tall the vision grid is
+        self.nodes_per_cell = 4  # Number of features per grid cell
+        self.input_size = grid_width * grid_height * self.nodes_per_cell
 
 
 class FitnessWeights:
-    def __init__(self, food: float, time_alive: float, cells_eaten: float, highest_mass: float):
+    def __init__(self, food: float, time_alive: float, cells_eaten: float, highest_mass: float, death: float):
         self.food = food
         self.time_alive = time_alive
         self.cells_eaten = cells_eaten
         self.highest_mass = highest_mass
+        self.death = death
 
 
 class BaseAgent(threading.Thread):
@@ -224,87 +228,56 @@ class RNNAgent(BaseAgent):
             noise = torch.randn_like(param) * sigma  # Gaussian noise
             param.data.add_(noise)
 
-    def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, highest_mass: float):
+    def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, highest_mass: float, died: int):
         """
         Calculates the fitness of the agent based on the given statistics.
-        :param food_eaten: Number of food cells eaten
-        :param time_alive: Time alive in seconds
-        :param cells_eaten: Number of players cells eaten
+        :param food_score: Number of food eaten
+        :param time_alive: Proportion of time alive out of total game time (0 to 1)
+        :param cells_eaten: Number of cells eaten
         :param highest_mass: Highest mass achieved
+        :param died: Binary death indicator (0 or 1)
         :return: Fitness score
         """
         return (self.fitness_weights.food * food_eaten +
                 self.fitness_weights.time_alive * time_alive +
                 self.fitness_weights.cells_eaten * cells_eaten +
-                self.fitness_weights.highest_mass * highest_mass)
+                self.fitness_weights.highest_mass * highest_mass
+                - self.fitness_weights.death * died)
 
-    def get_action(self, objects: list[geometry_utils.GameObject]):
+    def init_grid(self):
         """
-        Returns the action of the RNN after inputting the visible objects.
-        :param objects: list of GameObjects for input
-        :return: tuple of (move_x, move_y, split, eject)
+        Generates an empty grid of shape (grid_width, grid_height, nodes_per_cell)
+        :return: the torch grid
         """
-        GRID_WIDTH = 9
-        GRID_HEIGHT = 6
-        CELL_FEATURES = 4  # features per cell
-        TOTAL_INPUTS = GRID_WIDTH * GRID_HEIGHT * CELL_FEATURES
-
-        assert self.hyperparameters.input_size == TOTAL_INPUTS, f"input_size must be {TOTAL_INPUTS} for {GRID_WIDTH}x{GRID_HEIGHT} grid"
-
-        # Create empty grid: shape (GRID_SIZE, GRID_SIZE, 8)
-        grid = torch.zeros((GRID_WIDTH, GRID_HEIGHT, CELL_FEATURES),
+        return torch.zeros((self.hyperparameters.grid_width, self.hyperparameters.grid_height, self.hyperparameters.nodes_per_cell),
                            device=self.device,
                            dtype=torch.float32)
 
-        max_food = 0
-        max_virus = 0
-        max_player = 0
+    def get_grid_index(self, pos: geometry_utils.Vector):
+        """
+        Converts given position from [-1, 1] to grid index (x, y)
+        :param pos: Vector position to convert
+        :return:
+        """
+        # Convert pos.x/y in [-1,1] to grid index 0..GRID_SIZE-1
+        gx = int((pos.x + 1) * 0.5 * (self.hyperparameters.grid_width - 1))
+        gy = int((pos.y + 1) * 0.5 * (self.hyperparameters.grid_height - 1))
 
-        for obj in objects:
-            # Convert pos.x/y in [-1,1] to grid index 0..GRID_SIZE-1
-            gx = int((obj.pos.x + 1) * 0.5 * (GRID_WIDTH - 1))
-            gy = int((obj.pos.y + 1) * 0.5 * (GRID_HEIGHT - 1))
+        # Safety clamp (just in case)
+        gx = max(0, min(self.hyperparameters.grid_width - 1, gx))
+        gy = max(0, min(self.hyperparameters.grid_height - 1, gy))
 
-            # Safety clamp (just in case)
-            gx = max(0, min(GRID_WIDTH - 1, gx))
-            gy = max(0, min(GRID_HEIGHT - 1, gy))
+        return gx, gy
 
-            cell = grid[gx, gy]
 
-            # One-hot-ish counts
-            if obj.label == "food":
-                cell[0] += obj.count
-                if cell[0] > max_food:
-                    max_food = cell[0]
-            elif obj.label == "virus":
-                cell[1] += obj.count
-                if cell[1] > max_virus:
-                    max_virus = cell[1]
-            elif obj.label == "player":
-                cell[2] += obj.count
-                if cell[2] > max_player:
-                    max_player = cell[2]
-
-            # Aggregate raw stats (sum for now)
-            cell[3] += obj.area
-
-        # Normalize
-        for gx in range(GRID_WIDTH):
-            for gy in range(GRID_HEIGHT):
-                cell = grid[gx, gy]
-                if max_food != 0:
-                    cell[0] /= max_food
-                if max_virus != 0:
-                    cell[1] /= max_virus
-                if max_player != 0:
-                    cell[2] /= max_player
-
-                cell[3] /= 5000  # Rough estimate for max area
-
-        #print(grid)
-
+    def get_action(self, vision_grid: torch.Tensor):
+        """
+        Returns the action of the RNN after inputting the vision grid
+        :param vision_grid: torch.Tensor of shape (GRID_WIDTH, GRID_HEIGHT, nodes_per_cell)
+        :return: tuple of (move_x, move_y, split, eject)
+        """
         # Flatten grid to shape (1, input_size)
-        x = grid.reshape(1, TOTAL_INPUTS)
+        x = vision_grid.reshape(1, self.hyperparameters.input_size)
 
         # Feed the RNN: (batch, seq_len=1, features)
         x = x.unsqueeze(1)
@@ -384,7 +357,7 @@ class RNNAgent(BaseAgent):
                         self.alive = False
                         return None
                     food_eaten, time_alive, cells_eaten, highest_mass = stats
-                    self.fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass)
+                    self.fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass, int(not self.alive))
                     self.alive = False
                     return self.fitness
             time.sleep(self.run_interval)

@@ -1,6 +1,6 @@
 import agent
 import time
-import math
+import torch
 from tqdm import tqdm
 from game.opencv_view import OCView
 from game.new_model import Model
@@ -39,14 +39,16 @@ class AgarioSimulation:
 
             prev_target_pos.append(players[i].center())
 
-        model = Model(players, bounds=bounds, chunk_size=500)
+        model = Model(players, bounds=bounds, chunk_size=self.bounds // 10)  # 21 chunks per side
         model.spawn_cells(self.food_count)
         model.spawn_viruses(self.virus_count)
+        print(f"Simulation model initialized with {model.chunk_count_x}x{model.chunk_count_y}={model.chunk_count_x*model.chunk_count_y} chunks.")
 
         view = OCView(self.base_view_width, self.base_view_height, model, players[0], debug=False)
 
         start_time = time.time()
         last_agent_run_frame = -100
+        #vision_grid = self.agents[0].init_grid()
         for frame in tqdm(range(num_frames), desc="Running simulation", unit="frames"):
             # Maintain virus and food counts
             if model.num_viruses < self.virus_count:
@@ -70,72 +72,85 @@ class AgarioSimulation:
 
                     agents_alive += 1
 
-                    # Get nearby cells
+                    # Get all chunks in the view bounds
                     center_pos = players[i].center()
-                    chunks = model.get_overlap_chunks(players[i].parts)
-
                     score = players[i].score()  # View bounds is expanded based on score
                     half_view_width = (self.base_view_width + score) / 2
                     half_view_height = (self.base_view_height + score) / 2
                     # Bounds is top left corner and bottom right corner
                     view_bounds = ((center_pos[0] - half_view_width, center_pos[1] + half_view_height),
                                    (center_pos[0] + half_view_width, center_pos[1] - half_view_height))
-                    objects_in_view = []
 
-                    for chunk in chunks:
+                    vision_grid = self.agents[i].init_grid()
+                    max_food = 0
+                    max_virus = 0
+                    max_player = 0
+                    max_area = 0.0
+
+                    for chunk in model.get_chunks(view_bounds):
                         for cell in chunk.cells:
                             if cell.within_bounds(view_bounds):
-                                # Prepare object for network input
+                                # Normalize global position to relative position in the view bounds from [-1, 1]
                                 normalized_pos = Vector((cell.pos[0] - center_pos[0]) / half_view_width,
                                                         (cell.pos[1] - center_pos[1]) / half_view_height)
-                                obj = GameObject("food",
-                                                 normalized_pos,
-                                                 cell.area(),
-                                                 cell.perimeter(),
-                                                 1.0,
-                                                 1,
-                                                 (Vector(0, 0), Vector(0, 0)))
-                                objects_in_view.append(obj)
+
+                                gx, gy = self.agents[i].get_grid_index(normalized_pos)
+                                grid_cell = vision_grid[gx, gy]
+                                grid_cell[0] += 1  # Food count
+                                grid_cell[3] += cell.area()
+
+                                if grid_cell[0] > max_food:
+                                    max_food = grid_cell[0]
+
+                                if grid_cell[3] > max_area:
+                                    max_area = grid_cell[3]
+                        for virus in chunk.viruses:
+                            if virus.within_bounds(view_bounds):
+                                # Normalize global position to relative position in the view bounds from [-1, 1]
+                                normalized_pos = Vector((virus.pos[0] - center_pos[0]) / half_view_width,
+                                                        (virus.pos[1] - center_pos[1]) / half_view_height)
+
+                                gx, gy = self.agents[i].get_grid_index(normalized_pos)
+                                grid_cell = vision_grid[gx, gy]
+                                grid_cell[1] += 1  # Virus count
+                                grid_cell[3] += virus.area()
+
+                                if grid_cell[1] > max_virus:
+                                    max_virus = grid_cell[1]
+
+                                if grid_cell[3] > max_area:
+                                    max_area = grid_cell[3]
                         for player in chunk.players:
                             for part in player.parts:
                                 if part.within_bounds(view_bounds):
-                                    # Prepare object for network input
+                                    # Normalize global position to relative position in the view bounds from [-1, 1]
                                     normalized_pos = Vector((part.pos[0] - center_pos[0]) / half_view_width,
                                                             (part.pos[1] - center_pos[1]) / half_view_height)
-                                    obj = GameObject("player",
-                                                     normalized_pos,
-                                                     part.area(),
-                                                     part.perimeter(),
-                                                     1.0,
-                                                     1,
-                                                     (Vector(0, 0), Vector(0, 0)))
-                                    objects_in_view.append(obj)
-                        for virus in chunk.viruses:
-                            if virus.within_bounds(view_bounds):
-                                # Prepare object for network input
-                                normalized_pos = Vector((virus.pos[0] - center_pos[0]) / half_view_width,
-                                                        (virus.pos[1] - center_pos[1]) / half_view_height)
-                                obj = GameObject("virus",
-                                                 normalized_pos,
-                                                 virus.area(),
-                                                 virus.perimeter(),
-                                                 1.0,
-                                                 1,
-                                                 (Vector(0, 0), Vector(0, 0)))
-                                objects_in_view.append(obj)
 
-                    move_x, move_y, split, eject = self.agents[i].get_action(objects_in_view)
-                    agent_pos = players[i].center()
+                                    gx, gy = self.agents[i].get_grid_index(normalized_pos)
+                                    grid_cell = vision_grid[gx, gy]
+                                    grid_cell[2] += 1  # PlayerCell count
+                                    grid_cell[3] += part.area()
 
-                    # Normalize move vector
-                    move_length = math.sqrt(move_x ** 2 + move_y ** 2)
-                    if move_length > 1:
-                        move_x /= move_length
-                        move_y /= move_length
+                                    if grid_cell[2] > max_player:
+                                        max_player = grid_cell[2]
+
+                                    if grid_cell[3] > max_area:
+                                        max_area = grid_cell[3]
+
+                    # Normalize nodes in grid using vectorized division
+                    vision_grid /= torch.tensor(
+                        [max_food, max_virus, max_player, max_area],
+                        device=vision_grid.device,
+                        dtype=vision_grid.dtype
+                    )
+                    vision_grid.nan_to_num_(nan=0.0)  # NaN values come from divisions by 0 (when max values are 0)
+
+                    move_x, move_y, split, eject = self.agents[i].get_action(vision_grid)
 
                     # Execute actions
-                    target_pos = (agent_pos[0] + move_x * self.agents[i].hyperparameters.move_sensitivity,
-                                  agent_pos[1] + move_y * self.agents[i].hyperparameters.move_sensitivity)
+                    target_pos = (center_pos[0] + move_x * self.agents[i].hyperparameters.move_sensitivity,
+                                  center_pos[1] + move_y * self.agents[i].hyperparameters.move_sensitivity)
 
                     if split > 0:
                         players[i].split(target_pos)
@@ -150,15 +165,16 @@ class AgarioSimulation:
                     break
 
             model.update()
-            if not headless and frame % 60 == 0:
+            if not headless:
                 view.redraw()
 
         fitnesses = []
         for i in range(len(self.agents)):
             fitnesses.append(self.agents[i].calculate_fitness(players[i].num_food_eaten,
-                                                              players[i].time_alive,
+                                                              players[i].ticks_alive / num_frames,
                                                               players[i].num_players_eaten,
-                                                              players[i].highest_score))
+                                                              players[i].highest_score,
+                                                              int(not players[i].alive)))
         print(f"Simulation complete after {time.time() - start_time:.2f} seconds")
         return fitnesses
 

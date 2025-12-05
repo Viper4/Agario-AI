@@ -73,7 +73,7 @@ class Cell(Circle, Victim):
     def within_bounds(self, bounds: tuple[tuple[int, int], tuple[int, int]]):
         """Returns whether this cell is within the given bounds."""
         # Bounds is (top_left, bottom_right)
-        return bounds[0][0] <= self.pos[0] <= bounds[1][0] and bounds[0][1] <= self.pos[1] <= bounds[1][1]
+        return bounds[0][0] <= self.pos[0] <= bounds[1][0] and bounds[1][1] <= self.pos[1] <= bounds[0][1]
 
     @classmethod
     def make_random(cls, bounds):

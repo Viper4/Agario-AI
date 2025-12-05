@@ -25,12 +25,14 @@ class Player(interfaces.Victim, interfaces.Killer):
         self.num_food_eaten = 0
         self.num_players_eaten = 0
         self.highest_score = 0.0
-        self.time_alive = 0.0
-        self.start_time = time.time()
+        self.ticks_alive = 0
         self.alive = True
 
     def move(self):
         """Move each part of player and check parts for collision."""
+        if not self.alive:
+            return
+        self.ticks_alive += 1
         for i, cell in enumerate(self.parts):
             cell.move()
             for part in self.parts[i + 1:]:
@@ -158,9 +160,6 @@ class Player(interfaces.Victim, interfaces.Killer):
             self.parts.remove(cell)
         except ValueError:
             pass
-        if len(self.parts) == 0:
-            self.time_alive = time.time() - self.start_time
-            self.alive = False
 
     def reset(self):
         self.parts = self.parts[:1]

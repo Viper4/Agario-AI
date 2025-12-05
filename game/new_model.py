@@ -92,6 +92,26 @@ class Model:
     def get_overlap_chunks(self, cells):
         return list(self._overlap_chunks(cells))
 
+    def get_chunks(self, bounds: tuple[tuple[int, int], tuple[int, int]]):
+        """
+        Get all chunks that overlap the given bounds.
+        :param bounds: (top_left, bottom_right)
+        :return:
+        """
+        min_x = bounds[0][0]
+        max_x = bounds[1][0]
+        min_y = bounds[1][1]
+        max_y = bounds[0][1]
+
+        # Convert world bounds to chunk coordinates
+        start_cx, start_cy = self._chunk_coords((min_x, min_y))
+        end_cx, end_cy = self._chunk_coords((max_x, max_y))
+
+        # Iterate only the chunks inside that region
+        for cx in range(start_cx, end_cx + 1):
+            for cy in range(start_cy, end_cy + 1):
+                yield self.chunks[cx][cy]
+
     # ---------------------------------------------------------------------
     # Bounding helpers
     # ---------------------------------------------------------------------
@@ -126,6 +146,7 @@ class Model:
     def remove_player(self, player):
         chunk = self._chunk(player.center())
         if player in chunk.players:
+            player.alive = False
             chunk.players.remove(player)
             self.num_players -= 1
 

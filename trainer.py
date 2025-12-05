@@ -198,35 +198,16 @@ class GeneticTrainer:
 
 if __name__ == "__main__":
     # Max number of objects on screen at a time reaches ~50 so define fixed input of 32 objects with 8 nodes per object
-    hyperparameters = Hyperparameters(input_size=9*6*4,  # 9x6 grid of 4 nodes for food_count, virus_count, player_count, area_sum
-                                      hidden_layers=[64, 16],
+    hyperparameters = Hyperparameters(hidden_layers=[64, 16],
                                       output_size=4,
                                       run_interval=0.1,
                                       param_mutations={"weight": 2.0, "bias": 0.5},
-                                      move_sensitivity=50.0)
-    fitness_weights = FitnessWeights(food=0, time_alive=0, cells_eaten=1.0, highest_mass=1.0)
+                                      move_sensitivity=50.0,
+                                      grid_width=9,
+                                      grid_height=6)
+    fitness_weights = FitnessWeights(food=0.1, time_alive=2.0, cells_eaten=5.0, highest_mass=1.0, death=100.0)
 
     trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
                              hyperparameters=hyperparameters,
                              fitness_weights=fitness_weights)
     trainer.train(True, 5)
-
-    '''command = input("Enter command> ")
-    if command == "train":
-        
-    elif command == "test":
-        model_selection = input("Select model to test (0=None, 1=Model Based, 2=Neural Network)> ")
-        if model_selection == "0":
-            agent = BaseAgent(0.25, fitness_weights)
-            print(f"Game finished with {agent.run_web_game(visualize=True)} fitness")
-        elif model_selection == "1":
-            model_based_agent = ModelBasedReflexAgent(run_interval=0.1, fitness_weights=fitness_weights)
-            print(f"Game finished with {model_based_agent.run_web_game(True)}")
-        elif model_selection == "2":
-            network_agent = RNNAgent(hyperparameters=hyperparameters,
-                                     fitness_weights=fitness_weights,
-                                     randomize_params=False,
-                                     device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-            print(f"Game finished with {network_agent.run_web_game(True)} fitness")
-    else:
-        print("Invalid command")'''
