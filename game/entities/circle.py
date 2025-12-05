@@ -16,7 +16,9 @@ class Circle():
 
     def sqr_distance_to(self, circle):
         """Returns square distance to passed circle."""
-        return (self.pos[0] - circle.pos[0])**2 + (self.pos[1] - circle.pos[1])**2
+        dx = self.pos[0] - circle.pos[0]
+        dy = self.pos[1] - circle.pos[1]
+        return dx * dx + dy * dy
 
     def is_intersects(self, circle):
         """Returns True if circles intersects, otherwise False."""
@@ -27,7 +29,7 @@ class Circle():
 
     def area(self):
         """Return circle area."""
-        return math.pi * self.radius**2
+        return math.pi * self.radius * self.radius
     
     def perimeter(self):
         """Return circle perimeter."""

@@ -5,7 +5,7 @@ from tqdm import tqdm
 from game.opencv_view import OCView
 from game.new_model import Model
 from game.entities import Player
-from geometry_utils import Vector, GameObject
+from geometry_utils import Vector
 
 
 class AgarioSimulation:
@@ -17,16 +17,16 @@ class AgarioSimulation:
         self.virus_count = virus_count
         self.agents = agents
 
-    def run(self, fps: int, simulation_duration: float, headless: bool):
+    def run(self, base_fps: int, simulation_duration: float, headless: bool):
         """
         Runs simulation with only AI agents without drawing the game's visuals.
         Stops when the duration is reached or when only 1 agent is alive.
-        :param fps: Frames per second for a game at normal speed.
+        :param base_fps: Frames per second for a game at normal speed.
         :param simulation_duration: How long the simulation runs in seconds. Doesn't mean termination will occur at this time.
         :param headless: Whether to draw the game's visuals.
         :return: List of fitness values for each agent
         """
-        num_frames = int(simulation_duration * fps)  # Number of iterations to run the simulation for
+        num_frames = int(simulation_duration * base_fps)  # Number of iterations to run the simulation for
 
         bounds = [self.bounds, self.bounds]
 
@@ -48,7 +48,6 @@ class AgarioSimulation:
 
         start_time = time.time()
         last_agent_run_frame = -100
-        #vision_grid = self.agents[0].init_grid()
         for frame in tqdm(range(num_frames), desc="Running simulation", unit="frames"):
             # Maintain virus and food counts
             if model.num_viruses < self.virus_count:
@@ -56,7 +55,7 @@ class AgarioSimulation:
             if model.num_cells < self.food_count:
                 model.spawn_cells(self.food_count - model.num_cells)
 
-            run_agent = frame - last_agent_run_frame >= self.agents[0].run_interval * fps
+            run_agent = frame - last_agent_run_frame >= self.agents[0].run_interval * base_fps
 
             if not run_agent:
                 # Maintain agent's previous target position
@@ -70,13 +69,19 @@ class AgarioSimulation:
                     if not players[i].alive:
                         continue
 
+                    players[i].ticks_alive += 1
+
                     agents_alive += 1
 
-                    # Get all chunks in the view bounds
+                    # Expand view bounds based on player's score
                     center_pos = players[i].center()
-                    score = players[i].score()  # View bounds is expanded based on score
-                    half_view_width = (self.base_view_width + score) / 2
-                    half_view_height = (self.base_view_height + score) / 2
+                    score = players[i].score()
+                    inv_scale = view.camera.get_inverse_scale(score)
+
+                    scaled_width = self.base_view_width * inv_scale
+                    scaled_height = self.base_view_height * inv_scale
+                    half_view_width = scaled_width * 0.5
+                    half_view_height = scaled_height * 0.5
                     # Bounds is top left corner and bottom right corner
                     view_bounds = ((center_pos[0] - half_view_width, center_pos[1] + half_view_height),
                                    (center_pos[0] + half_view_width, center_pos[1] - half_view_height))
@@ -120,23 +125,22 @@ class AgarioSimulation:
 
                                 if grid_cell[3] > max_area:
                                     max_area = grid_cell[3]
-                        for player in chunk.players:
-                            for part in player.parts:
-                                if part.within_bounds(view_bounds):
-                                    # Normalize global position to relative position in the view bounds from [-1, 1]
-                                    normalized_pos = Vector((part.pos[0] - center_pos[0]) / half_view_width,
-                                                            (part.pos[1] - center_pos[1]) / half_view_height)
+                        for playercell in chunk.playercells:
+                            if playercell.within_bounds(view_bounds):
+                                # Normalize global position to relative position in the view bounds from [-1, 1]
+                                normalized_pos = Vector((playercell.pos[0] - center_pos[0]) / half_view_width,
+                                                        (playercell.pos[1] - center_pos[1]) / half_view_height)
 
-                                    gx, gy = self.agents[i].get_grid_index(normalized_pos)
-                                    grid_cell = vision_grid[gx, gy]
-                                    grid_cell[2] += 1  # PlayerCell count
-                                    grid_cell[3] += part.area()
+                                gx, gy = self.agents[i].get_grid_index(normalized_pos)
+                                grid_cell = vision_grid[gx, gy]
+                                grid_cell[2] += 1  # PlayerCell count
+                                grid_cell[3] += playercell.area()
 
-                                    if grid_cell[2] > max_player:
-                                        max_player = grid_cell[2]
+                                if grid_cell[2] > max_player:
+                                    max_player = grid_cell[2]
 
-                                    if grid_cell[3] > max_area:
-                                        max_area = grid_cell[3]
+                                if grid_cell[3] > max_area:
+                                    max_area = grid_cell[3]
 
                     # Normalize nodes in grid using vectorized division
                     vision_grid /= torch.tensor(
@@ -153,9 +157,9 @@ class AgarioSimulation:
                                   center_pos[1] + move_y * self.agents[i].hyperparameters.move_sensitivity)
 
                     if split > 0:
-                        players[i].split(target_pos)
+                        model.split(players[i], target_pos)
                     if eject > 0:
-                        players[i].shoot(target_pos)
+                        model.shoot(players[i], target_pos)
                     model.update_velocity(players[i], target_pos)
                     prev_target_pos[i] = target_pos
 
@@ -166,7 +170,11 @@ class AgarioSimulation:
 
             model.update()
             if not headless:
-                view.redraw()
+                target_score = view.player.score()
+                # Expand view while maintaining aspect ratio
+                inv_scale = view.camera.get_inverse_scale(target_score)
+                view.camera.scale = 1.0 / inv_scale
+                view.redraw(spectate_mode=True)
 
         fitnesses = []
         agents_alive = 0
@@ -176,7 +184,7 @@ class AgarioSimulation:
             fitnesses.append(self.agents[i].calculate_fitness(players[i].num_food_eaten,
                                                               players[i].ticks_alive / num_frames,
                                                               players[i].num_players_eaten,
-                                                              players[i].highest_score,
+                                                              players[i].score(),
                                                               int(not players[i].alive)))
         print(f"Simulation complete after {time.time() - start_time:.2f} seconds with {agents_alive} agents alive")
         return fitnesses

@@ -7,7 +7,7 @@ from .entities import Cell, Virus
 
 
 class Model():
-    """Class that represents game state."""
+    """Class that represents game state. (Old model made by alexandr-gnrk)"""
 
     class Chunk():
         def __init__(self, players=None, cells=None):

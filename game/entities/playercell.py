@@ -39,6 +39,14 @@ class PlayerCell(Cell, interfaces.Killer):
         # food storage, to make the radius change smooth
         self.area_pool = 0
         self.decay_timer = self.DECAY_TIME * 60  # Lose 1 radius every x*60 frames
+        self.parent = None
+
+    def check_merge(self):
+        """
+        Checks if this playercell can merge with any of its parent's parts
+        :return: The merged cell if merged, otherwise None
+        """
+        return self.parent.check_merge(self)
 
     def move(self):
         """Update cell state and move by stored velocity."""
@@ -50,9 +58,12 @@ class PlayerCell(Cell, interfaces.Killer):
         """Increase current cell area with passed cell area,
         by changing cell area.
         """
-        if isinstance(cell, Virus) and num_parts < max_parts:
-            # Add less of virus area to pool
-            self.area_pool += cell.area() * 0.5
+        if isinstance(cell, Virus):
+            if num_parts < max_parts:
+                # Add less of virus area to pool
+                self.area_pool += cell.area() * 0.25
+            else:
+                self.area_pool += cell.area() * 0.8
         else:
             self.area_pool += cell.area()
         self.__add_area(self.__area_pool_give_out())
@@ -111,7 +122,15 @@ class PlayerCell(Cell, interfaces.Killer):
 
     def attempt_murder(self, victim):
         """Try to kill passed victim cell by self cell."""
-        return victim.try_to_kill_by(self)
+        killed_cell = victim.try_to_kill_by(self)
+        if killed_cell:
+            # feed player cell with killed cell
+            self.eat(killed_cell, len(self.parent.parts), self.parent.MAX_PARTS)
+            if isinstance(killed_cell, PlayerCell):
+                self.parent.num_players_eaten += 1
+            elif not isinstance(killed_cell, Virus):
+                self.parent.num_food_eaten += 1
+        return killed_cell
 
     def shoot(self, angle):
         """Shoot in the given angle.
@@ -131,11 +150,13 @@ class PlayerCell(Cell, interfaces.Killer):
         """Spit cell in the given angle in degrees.
         Returns the splitted part.
         """
-        return self.emit(
-            angle, 
+        new_playercell = self.emit(
+            angle,
             self.SPLITCELL_SPEED,
             self.radius/math.sqrt(2),
             PlayerCell)
+        new_playercell.parent = self.parent
+        return new_playercell
 
     def able_to_split(self):
         """Checks is cell able to split."""

@@ -1,5 +1,4 @@
 import os.path
-
 import torch
 import numpy as np
 import random
@@ -13,7 +12,7 @@ from tqdm import tqdm
 
 
 # Function needs to be picklable so keep it out of classes
-def run_simulation_worker(fps: int, simulation_duration: float, agent_snapshots: list[dict], pickled_data: bytes):
+def run_simulation_worker(fps: int, simulation_duration: float, agent_snapshots: list[dict], pickled_data: bytes, headless: bool):
     hyperparameters, fitness_weights = pickle.loads(pickled_data)
     agents = []
     for agent_snapshot in agent_snapshots:
@@ -22,7 +21,7 @@ def run_simulation_worker(fps: int, simulation_duration: float, agent_snapshots:
         agent.rnn.load_state_dict(agent_snapshot)  # Load agent parameters from snapshot
         agents.append(agent)
     sim = agario_simulation.AgarioSimulation(900, 600, 1500, 600, 20, agents)
-    return sim.run(fps, simulation_duration, True)
+    return sim.run(fps, simulation_duration, headless)
 
 
 class GeneticTrainer:
@@ -116,7 +115,7 @@ class GeneticTrainer:
                 for i in range(num_simulations):
                     jobs.append(pool.apply_async(
                         run_simulation_worker,
-                        args=(60, 240, agent_snapshots, pickled_data,)
+                        args=(60, 240, agent_snapshots, pickled_data, True,)
                     ))
 
                 pool.close()  # no more tasks
@@ -205,7 +204,7 @@ if __name__ == "__main__":
                                       move_sensitivity=50.0,
                                       grid_width=9,
                                       grid_height=6)
-    fitness_weights = FitnessWeights(food=0.1, time_alive=10.0, cells_eaten=10.0, highest_mass=1.0, death=100.0)
+    fitness_weights = FitnessWeights(food=0.1, time_alive=10.0, cells_eaten=20.0, highest_mass=1.0, death=100.0)
 
     trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
                              hyperparameters=hyperparameters,

@@ -24,6 +24,8 @@ class Cell(Circle, Victim):
         self.speed = speed
         self.num_food_eaten = 0
         self.id = random.randint(0, 100000)
+        self.cx = 0
+        self.cy = 0
 
     def move(self):
         """Move accroding to stored velocity."""
@@ -59,7 +61,7 @@ class Cell(Circle, Victim):
     def try_to_kill_by(self, killer):
         """Check is killer cell could eat current cell."""
         # Must be ~82% mass of killer to be eaten
-        threshold = killer.radius - self.radius
+        threshold = killer.radius
         if self.mass() < killer.mass() * 0.82 and self.sqr_distance_to(killer) <= threshold * threshold:
             return self
         return None
