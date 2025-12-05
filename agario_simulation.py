@@ -169,13 +169,16 @@ class AgarioSimulation:
                 view.redraw()
 
         fitnesses = []
+        agents_alive = 0
         for i in range(len(self.agents)):
+            if players[i].alive:
+                agents_alive += 1
             fitnesses.append(self.agents[i].calculate_fitness(players[i].num_food_eaten,
                                                               players[i].ticks_alive / num_frames,
                                                               players[i].num_players_eaten,
                                                               players[i].highest_score,
                                                               int(not players[i].alive)))
-        print(f"Simulation complete after {time.time() - start_time:.2f} seconds")
+        print(f"Simulation complete after {time.time() - start_time:.2f} seconds with {agents_alive} agents alive")
         return fitnesses
 
 

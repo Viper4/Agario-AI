@@ -205,7 +205,7 @@ if __name__ == "__main__":
                                       move_sensitivity=50.0,
                                       grid_width=9,
                                       grid_height=6)
-    fitness_weights = FitnessWeights(food=0.1, time_alive=2.0, cells_eaten=5.0, highest_mass=1.0, death=100.0)
+    fitness_weights = FitnessWeights(food=0.1, time_alive=10.0, cells_eaten=10.0, highest_mass=1.0, death=100.0)
 
     trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
                              hyperparameters=hyperparameters,

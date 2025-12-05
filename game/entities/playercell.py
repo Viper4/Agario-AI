@@ -1,6 +1,7 @@
 import math
 import random
 from operator import add, sub
+import time
 
 from .. import gameutils as gu
 from . import interfaces
@@ -27,7 +28,7 @@ class PlayerCell(Cell, interfaces.Killer):
     # the time before a сell can merge with another cell in seconds
     SPLIT_TIMEOUT = 30
 
-    DECAY_TIME = 5
+    DECAY_TIME = 30
     MIN_RADIUS = 20
 
     def __init__(self, pos, radius, color, angle=0, speed=0):

@@ -231,7 +231,7 @@ class RNNAgent(BaseAgent):
     def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, highest_mass: float, died: int):
         """
         Calculates the fitness of the agent based on the given statistics.
-        :param food_score: Number of food eaten
+        :param food_eaten: Number of food eaten
         :param time_alive: Proportion of time alive out of total game time (0 to 1)
         :param cells_eaten: Number of cells eaten
         :param highest_mass: Highest mass achieved

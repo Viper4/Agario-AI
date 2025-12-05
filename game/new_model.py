@@ -141,6 +141,7 @@ class Model:
 
     def add_player(self, player):
         self._chunk(player.center()).players.add(player)
+        player.alive = True
         self.num_players += 1
 
     def remove_player(self, player):
@@ -268,8 +269,10 @@ class Model:
             for virus in nearby_viruses:
                 killed, killer = player.attempt_murder(virus)
                 if killed:
+                    self.remove_player(player)
                     player.explode(killer)
                     self.remove_virus(killed)
+                    self.add_player(player)
 
             # Eat other players / parts
             for other in nearby_players:
