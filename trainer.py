@@ -46,7 +46,7 @@ class GeneticTrainer:
             with open("agent_snapshots.pkl", "rb") as f:
                 agent_snapshots = pickle.load(f)
                 for agent_snapshot in agent_snapshots:
-                    agent = RNNAgent(self.hyperparameters, fitness_weights=self.fitness_weights,
+                    agent = RNNAgent(hyperparameters=self.hyperparameters.copy(), fitness_weights=self.fitness_weights,
                                      randomize_params=False, device=torch.device("cpu"))
                     agent.rnn.load_state_dict(agent_snapshot)
                     self.population.append(agent)
@@ -57,7 +57,7 @@ class GeneticTrainer:
 
         # Fill remaining agents with randomized agents
         for i in range(self.population_size - len(self.population)):
-            self.population.append(RNNAgent(self.hyperparameters, fitness_weights=self.fitness_weights,
+            self.population.append(RNNAgent(self.hyperparameters.copy(), fitness_weights=self.fitness_weights,
                                             randomize_params=True, device=torch.device("cpu")))
 
     def reproduce(self, parent1: RNNAgent, parent2: RNNAgent, num_children: int):
@@ -72,7 +72,7 @@ class GeneticTrainer:
         """
         children = []
         for i in range(num_children):
-            child = RNNAgent(parent1.hyperparameters, fitness_weights=parent1.fitness_weights,
+            child = RNNAgent(parent1.hyperparameters.copy(), fitness_weights=parent1.fitness_weights,
                              randomize_params=False, device=torch.device("cpu"))
 
             # Crossover from both parents
@@ -100,9 +100,6 @@ class GeneticTrainer:
         """
         generation = 0
         self.init_agents(load_from_file)
-
-        with open("cluster_settings.json") as f:
-            cluster_settings = json.load(f)
 
         while self.max_generations is None or generation < self.max_generations:
             total_sim_fitnesses = [0.0] * self.population_size  # Element at i = total fitness of agent i over all simulations
@@ -208,7 +205,8 @@ if __name__ == "__main__":
                                       param_mutations={"weight": 2.0, "bias": 0.5},
                                       move_sensitivity=50.0,
                                       grid_width=9,
-                                      grid_height=6)
+                                      grid_height=6,
+                                      nodes_per_cell=4)
     fitness_weights = FitnessWeights(food=0.1, time_alive=10.0, cells_eaten=20.0, score=1.0, death=100.0)
 
     trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),

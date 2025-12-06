@@ -1,15 +1,14 @@
 import time
 import threading
-import math
 import geometry_utils
-from image_processing import ImageProcessing
-from web_scraper import WebScraper
 import random
 import torch
+from image_processing import ImageProcessing
+from web_scraper import WebScraper
 
 
 class Hyperparameters:
-    def __init__(self, hidden_layers: list[int], output_size: int, run_interval: float, param_mutations: dict, move_sensitivity: float, grid_width: int, grid_height: int):
+    def __init__(self, hidden_layers: list[int], output_size: int, run_interval: float, param_mutations: dict, move_sensitivity: float, grid_width: int, grid_height: int, nodes_per_cell: int):
         self.hidden_layers = hidden_layers  # Defines number of hidden nodes at layer i
         self.output_size = output_size
         self.run_interval = run_interval  # Time between actions in seconds
@@ -17,8 +16,26 @@ class Hyperparameters:
         self.move_sensitivity = move_sensitivity  # Factor to multiply the move output vector by
         self.grid_width = grid_width  # How many cells wide the vision grid is
         self.grid_height = grid_height  # How many cells tall the vision grid is
-        self.nodes_per_cell = 4  # Number of features per grid cell
+        self.nodes_per_cell = nodes_per_cell  # Number of features per grid cell
         self.input_size = grid_width * grid_height * self.nodes_per_cell
+
+    def copy(self):
+        """
+        Creates a copy of this hyperparameter
+        :return:
+        """
+        copied = Hyperparameters(
+            hidden_layers=self.hidden_layers.copy(),
+            output_size=self.output_size,
+            run_interval=self.run_interval,
+            param_mutations=self.param_mutations.copy(),
+            move_sensitivity=self.move_sensitivity,
+            grid_width=self.grid_width,
+            grid_height=self.grid_height,
+            nodes_per_cell=self.nodes_per_cell
+        )
+        copied.input_size = self.input_size
+        return copied
 
 
 class FitnessWeights:
@@ -163,10 +180,7 @@ class RNNAgent(BaseAgent):
         self.hyperparameters = hyperparameters
         self.device = device
 
-        if hyperparameters is None:
-            self.load_agent("agent.pth")
-        else:
-            self.rnn = CustomRNN(hyperparameters.input_size, hyperparameters.hidden_layers, hyperparameters.output_size, self.device)
+        self.rnn = CustomRNN(hyperparameters.input_size, hyperparameters.hidden_layers, hyperparameters.output_size, self.device)
         self.hidden = None  # Hidden states for each layer (memory)
 
         # Randomize the parameters if specified
@@ -192,19 +206,6 @@ class RNNAgent(BaseAgent):
         self.hidden = h
         return output
 
-    def save_agent(self):
-        """
-        Saves this agent's hyperparameters and RNN to a file
-        """
-        torch.save((self.hyperparameters, self.rnn), "agent.pth")
-
-    def load_agent(self, path: str):
-        """
-        Loads hyperparameters, and RNN from the given path
-        :param path: str
-        """
-        self.hyperparameters, self.rnn = torch.load(path)
-
     def reduce_sigma(self, factor: float):
         """
         Reduce the standard deviation of mutation as the agent becomes more fit.
@@ -219,7 +220,7 @@ class RNNAgent(BaseAgent):
         """
         for name, param in list(self.rnn.named_parameters()):
             sigma = 0
-            # Find the mutation hyperparam(s) associated with this parameter
+            # Find the mutation hyperparam associated with this parameter
             for key, value in self.hyperparameters.param_mutations.items():
                 if key in name:
                     sigma = value
@@ -268,7 +269,6 @@ class RNNAgent(BaseAgent):
         gy = max(0, min(self.hyperparameters.grid_height - 1, gy))
 
         return gx, gy
-
 
     def get_action(self, vision_grid: torch.Tensor):
         """
