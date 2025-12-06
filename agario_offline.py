@@ -5,7 +5,7 @@ import threading
 
 from game.opencv_view import OCView
 from game.view import View
-from game.new_model import Model
+from game.model import Model
 from game.entities import Player
 
 

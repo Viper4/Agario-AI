@@ -1,228 +1,399 @@
-import itertools
 import time
+import itertools
+from dataclasses import dataclass, field
 
-from loguru import logger
-
-from .entities import Cell, Virus
+from .entities import Cell, Virus, PlayerCell
 
 
-class Model():
-    """Class that represents game state. (Old model made by alexandr-gnrk)"""
+@dataclass
+class Chunk:
+    playercells: set = field(default_factory=set)
+    cells: set = field(default_factory=set)
+    viruses: set = field(default_factory=set)
 
-    class Chunk():
-        def __init__(self, players=None, cells=None):
-            players = list() if players is None else players
-            cells = list() if cells is None else cells
-            self.players = players
-            self.cells = cells
 
-    # duration of round in seconds
-    ROUND_DURATION = 240
+class Model:
+    """
+    Efficient game-state model for Agar.io simulation.
+    """
+    def __init__(self, players=None, cells=None, viruses=None,
+                 bounds=(1000, 1000), chunk_size=1000):
 
-    def __init__(self, players=None, cells=None, bounds=(1000, 1000), chunk_size=1000, fps=60):
-        players = list() if players is None else players
-        cells = list() if cells is None else cells
-        # means that size of world is [-world_size, world_size]
         self.bounds = bounds
         self.chunk_size = chunk_size
-        self.chunks = list()
-        for i in range((self.bounds[0] * 2) // chunk_size + 1):
-            self.chunks.append(list())
-            for j in range((self.bounds[1] * 2) // chunk_size + 1):
-                self.chunks[-1].append(self.Chunk())
 
-        self.num_players = 0
+        # Each list indexed by object.id
+        self.num_player_cells = 0
         self.num_cells = 0
-        self.num_viruses = 0  # Just including viruses within the cells lists since its more convenient
-        for player in players:
-            self.add_player(player)
-            self.num_players += 1
-        for cell in cells:
-            self.add_cell(cell)
-            self.num_cells += 1
+        self.num_viruses = 0
+
+        # Build chunk grid
+        self.chunk_count_x = (bounds[0] * 2) // chunk_size + 1
+        self.chunk_count_y = (bounds[1] * 2) // chunk_size + 1
+
+        self.chunks = list()
+        for _ in range(self.chunk_count_x):
+            self.chunks.append([])
+            for _ in range(self.chunk_count_y):
+                self.chunks[-1].append(Chunk())
+
+        if players is not None:
+            for p in players:
+                for pc in p.parts:
+                    self.add_playercell(pc)
+        if cells is not None:
+            for c in cells:
+                self.add_cell(c)
+        if viruses is not None:
+            for v in viruses:
+                self.add_virus(v)
 
         self.round_start = time.time()
-        self.fps = fps
+
+    # ---------------------------------------------------------------------
+    # Chunking helpers
+    # ---------------------------------------------------------------------
+
+    def _chunk_coords(self, pos: tuple[float, float]):
+        """
+        Convert a world position to chunk grid coords.
+        :param pos:
+        :return:
+        """
+        x = int((pos[0] + self.bounds[0]) // self.chunk_size)
+        y = int((pos[1] + self.bounds[1]) // self.chunk_size)
+
+        x = max(0, min(self.chunk_count_x - 1, x))
+        y = max(0, min(self.chunk_count_y - 1, y))
+        return x, y
+
+    def _chunk(self, pos: tuple[float, float]):
+        """
+        Get the chunk at a world position.
+        :param pos:
+        :return:
+        """
+        x, y = self._chunk_coords(pos)
+        return self.chunks[x][y]
+
+    def _overlap_chunks(self, cell):
+        """
+        Yield all chunks whose bounding boxes intersect the given cell.
+        :param cell:
+        :return:
+        """
+        min_x = cell.pos[0] - cell.radius
+        max_x = cell.pos[0] + cell.radius
+        min_y = cell.pos[1] - cell.radius
+        max_y = cell.pos[1] + cell.radius
+
+        # Convert world bounds to chunk coordinates
+        start_cx, start_cy = self._chunk_coords((min_x, min_y))
+        end_cx, end_cy = self._chunk_coords((max_x, max_y))
+
+        # Iterate only the chunks inside that region
+        for cx in range(start_cx, end_cx + 1):
+            for cy in range(start_cy, end_cy + 1):
+                yield self.chunks[cx][cy]
+
+    def get_overlap_chunks(self, cell):
+        """
+        Return a list of chunks whose bounding boxes intersect the given cell.
+        :param cell:
+        :return:
+        """
+        return list(self._overlap_chunks(cell))
+
+    def get_chunks(self, bounds: tuple[tuple[int, int], tuple[int, int]]):
+        """
+        Yield all chunks that overlap the given bounds.
+        :param bounds: (top_left, bottom_right)
+        :return:
+        """
+        min_x = bounds[0][0]
+        max_x = bounds[1][0]
+        min_y = bounds[1][1]
+        max_y = bounds[0][1]
+
+        # Convert world bounds to chunk coordinates
+        start_cx, start_cy = self._chunk_coords((min_x, min_y))
+        end_cx, end_cy = self._chunk_coords((max_x, max_y))
+
+        # Iterate only the chunks inside that region
+        for cx in range(start_cx, end_cx + 1):
+            for cy in range(start_cy, end_cy + 1):
+                yield self.chunks[cx][cy]
+
+    # ---------------------------------------------------------------------
+    # Bounding helpers
+    # ---------------------------------------------------------------------
+
+    def _clamp_cell(self, cell):
+        """
+        Clamp a cell to map bounds.
+        :param cell:
+        :return:
+        """
+        bx, by = self.bounds
+        x, y = cell.pos
+
+        if x > bx:
+            cell.pos[0] = bx
+        elif x < -bx:
+            cell.pos[0] = -bx
+
+        if y > by:
+            cell.pos[1] = by
+        elif y < -by:
+            cell.pos[1] = -by
+
+    # ---------------------------------------------------------------------
+    # Add/remove objects
+    # ---------------------------------------------------------------------
+
+    def add_playercell(self, playercell: PlayerCell):
+        """
+        Adds the given playercell to the chunk it's in, updates its cx, cy, marks its player alive, and increments the player cell count.
+        :param playercell:
+        :return:
+        """
+        cx, cy = self._chunk_coords(playercell.pos)
+        playercell.cx = cx
+        playercell.cy = cy
+        chunk = self.chunks[cx][cy]
+        chunk.playercells.add(playercell)
+        playercell.parent.alive = True
+        self.num_player_cells += 1
+
+    def remove_playercell(self, playercell: PlayerCell):
+        """
+        Removes the given playercell from its cx, cy chunk and decrements player cell count.
+        :param playercell:
+        :return:
+        """
+        chunk = self.chunks[playercell.cx][playercell.cy]
+        if playercell in chunk.playercells:
+            chunk.playercells.remove(playercell)
+            self.num_player_cells -= 1
+
+    def add_cell(self, cell):
+        """
+        Adds the given cell to the chunk it's centered in, and increments the cell count.
+        :param cell:
+        :return:
+        """
+        cx, cy = self._chunk_coords(cell.pos)
+        cell.cx = cx
+        cell.cy = cy
+        chunk = self.chunks[cx][cy]
+        chunk.cells.add(cell)
+        self.num_cells += 1
+
+    def remove_cell(self, cell):
+        """
+        Removes the given cell from the chunk it's centered in, and decrements the cell count.
+        :param cell:
+        :return:
+        """
+        chunk = self.chunks[cell.cx][cell.cy]
+        if cell in chunk.cells:
+            chunk.cells.remove(cell)
+            self.num_cells -= 1
+
+    def add_virus(self, virus):
+        """
+        Adds the given virus to the chunk it's centered in, and increments the virus count.
+        :param virus:
+        :return:
+        """
+        cx, cy = self._chunk_coords(virus.pos)
+        virus.cx = cx
+        virus.cy = cy
+        chunk = self.chunks[cx][cy]
+        chunk.viruses.add(virus)
+        self.num_viruses += 1
+
+    def remove_virus(self, virus):
+        """
+        Removes the given virus from the chunk it's centered in, and decrements the virus count.
+        :param virus:
+        :return:
+        """
+        chunk = self.chunks[virus.cx][virus.cy]
+        if virus in chunk.viruses:
+            chunk.viruses.remove(virus)
+            self.num_viruses -= 1
+
+    # ---------------------------------------------------------------------
+    # Game actions
+    # ---------------------------------------------------------------------
 
     def update_velocity(self, player, target_pos):
-        """Update passed player velocity."""
+        """
+        Updates the velocity of the player given the target position to move to.
+        :param player:
+        :param target_pos:
+        :return:
+        """
         player.update_velocity(target_pos)
 
     def shoot(self, player, target_pos):
-        """Shoots into given direction."""
-        emitted_cells = player.shoot(target_pos)
-        for cell in emitted_cells:
-            self.add_cell(cell)
-
-        #if emitted_cells:
-        #    logger.debug(f'{player} shot')
-        #else:
-        #    logger.debug(f'{player} tried to shoot, but he can\'t')
+        """
+        Shoots a ejected cell from the player towards the target position.
+        :param player:
+        :param target_pos:
+        :return:
+        """
+        emitted = player.shoot(target_pos)
+        for c in emitted:
+            self.add_cell(c)
 
     def split(self, player, target_pos):
-        """Splits player."""
-        self.remove_player(player)
-        new_parts = player.split(target_pos)
-        self.add_player(player)
+        """
+        Splits the player towards target position.
+        :param player:
+        :param target_pos:
+        :return:
+        """
+        for pc in player.parts:
+            self.remove_playercell(pc)  # Remove parts from old chunks
+        player.split(target_pos)
+        for p in player.parts:
+            self.add_playercell(p)  # Add all parts back to chunks
 
-        #if new_parts:
-        #    logger.debug(f'{player} splitted')
-        #else:
-        #    logger.debug(f'{player} tried to split, but he can\'t')
+    # ---------------------------------------------------------------------
+    # Simulation update
+    # ---------------------------------------------------------------------
+
+    def move_cell(self, cell):
+        """
+        Moves the cell and updates its old chunk and new chunk.
+        :param cell:
+        :return:
+        """
+        old_cx = cell.cx
+        old_cy = cell.cy
+
+        cell.move()
+        self._clamp_cell(cell)
+
+        new_cx, new_cy = self._chunk_coords(cell.pos)
+        if old_cx != new_cx or old_cy != new_cy:
+            if isinstance(cell, PlayerCell):
+                self.remove_playercell(cell)  # Remove from old chunk
+                self.add_playercell(cell)  # Add to new chunk and update cx, cy
+            elif isinstance(cell, Virus):
+                self.remove_virus(cell)  # Remove from old chunk
+                self.add_virus(cell)  # Add to new chunk and update cx, cy
+            else:
+                self.remove_cell(cell)  # Remove from old chunk
+                self.add_cell(cell)  # Add to new chunk and update cx, cy
 
     def update(self):
-        """Updates game state."""
-        '''if time.time() - self.round_start >= self.ROUND_DURATION:
-            #logger.debug('New round was started.')
-            self.__reset_players()
-            self.round_start = time.time()'''
-
-        # update cells
+        """
+        Advances the game world by one tick.
+        :return:
+        """
+        # ---------- Update cells ----------
         for cell in self.cells:
-            self.remove_cell(cell)
-            cell.move()
-            self.bound_cell(cell)
-            self.add_cell(cell)
+            self.move_cell(cell)
 
-        # update players
-        observable_players = self.players
-        for player in observable_players:
-            self.remove_player(player)
-            player.move()
-            self.bound_player(player)
-            self.add_player(player)
+        # ---------- Update viruses ----------
+        for virus in self.viruses:
+            self.move_cell(virus)
 
-            # get chuncks around player
-            chunks = self.__nearby_chunks(player.center())
-            # get objects that stored in chunks
-            players = list()
-            cells = list()
-            for chunk in chunks:
-                players.extend(chunk.players)
-                cells.extend(chunk.cells)
-            
-            # check is player killed some cells (including viruses)
-            for cell in cells:
-                killed_cell, killer_cell = player.attempt_murder(cell)
-                if killed_cell:
-                    if isinstance(killed_cell, Virus):
-                        player.explode(killer_cell)
-                        self.remove_virus(killed_cell)
-                    else:
-                        self.remove_cell(killed_cell)
+            nearby_cells = []
+            for nc in self._overlap_chunks(virus):
+                nearby_cells.extend(nc.cells)
 
-            # check is player killed other players or their parts
-            for another_player in players:
-                if player == another_player:
+            # Eat ejected cells
+            for cell in nearby_cells:
+                if cell.radius != PlayerCell.SHOOTCELL_RADIUS or isinstance(cell, PlayerCell):
                     continue
-                killed_cell, killer_cell = player.attempt_murder(another_player)
-                if killed_cell:
-                    if len(another_player.parts) == 1:
-                        logger.debug(f'{player} ate {another_player}')
-                        self.remove_player(another_player)
-                        observable_players.remove(another_player)
-                        another_player.remove_part(killed_cell)
-                    else:
-                        logger.debug(f'{player} ate {another_player} part {killed_cell}')
-                        another_player.remove_part(killed_cell)
+                if cell.try_to_kill_by(virus):
+                    virus.eat(cell)
+                    new_virus = virus.try_split(cell.angle, cell.speed)
+                    self.remove_cell(cell)
+                    if new_virus:
+                        self.add_virus(new_virus)
 
-    def spawn_cells(self, amount):
-        """Spawn passed amount of cells on the field."""
-        for _ in range(amount):
-            self.add_cell(Cell.make_random(self.bounds))
+        # ---------- Update players ----------
+        for playercell in self.playercells:
+            if not playercell.parent.alive:
+                self.remove_playercell(playercell)
+                continue
 
-    def spawn_viruses(self, amount):
-        """Spawn a number of viruses on the field."""
-        for _ in range(amount):
-            self.add_virus(Virus.make_random(self.bounds))
+            self.move_cell(playercell)
 
-    def bound_cell(self, cell):
-        cell.pos[0] = self.bounds[0] if cell.pos[0] > self.bounds[0] else cell.pos[0]
-        cell.pos[0] = -self.bounds[0] if cell.pos[0] < -self.bounds[0] else cell.pos[0]
+            merged_cell = playercell.check_merge()
+            if merged_cell:
+                if merged_cell is playercell:
+                    self.remove_playercell(playercell)
+                    continue  # Skip rest of the update for this playercell
 
-        cell.pos[1] = self.bounds[1] if cell.pos[1] > self.bounds[1] else cell.pos[1]
-        cell.pos[1] = -self.bounds[1] if cell.pos[1] < -self.bounds[1] else cell.pos[1]
+            nearby_cells = []
+            nearby_playercells = []
+            nearby_viruses = []
+            # Nearby objects for collisions
+            for nc in self._overlap_chunks(playercell):
+                nearby_cells.extend(nc.cells)
+                nearby_playercells.extend(nc.playercells)
+                nearby_viruses.extend(nc.viruses)
 
-    def bound_player(self, player):
-        for cell in player.parts:
-            self.bound_cell(cell)
+            # Eat cells
+            for cell in nearby_cells:
+                killed = playercell.attempt_murder(cell)
+                if killed:
+                    self.remove_cell(killed)
 
-    def add_player(self, player):
-        self.__pos_to_chunk(player.center()).players.append(player)
+            # Eat viruses
+            for virus in nearby_viruses:
+                killed = playercell.attempt_murder(virus)
+                if killed:
+                    new_parts = playercell.parent.explode(playercell)
+                    for p in new_parts:
+                        self.add_playercell(p)
+                    self.remove_virus(killed)
 
-    def add_cell(self, cell):
-        self.__pos_to_chunk(cell.pos).cells.append(cell)
-        self.num_cells += 1
+            # Eat other players / parts
+            for other_pc in nearby_playercells:
+                if other_pc.parent is playercell.parent:
+                    continue  # Cant eat itself
+                killed = playercell.attempt_murder(other_pc)
+                if killed:
+                    other_pc.parent.remove_part(killed)
+                    self.remove_playercell(killed)
 
-    def add_virus(self, virus):
-        self.__pos_to_chunk(virus.pos).cells.append(virus)
-        self.num_viruses += 1
+    # ---------------------------------------------------------------------
+    # Spawning
+    # ---------------------------------------------------------------------
 
-    def remove_player(self, player):
-        try:
-            self.__pos_to_chunk(player.center()).players.remove(player)
-            self.num_players -= 1
-        except ValueError:
-            pass
+    def spawn_cells(self, n):
+        """
+        Spawns n cells randomly distributed within the map bounds.
+        :param n:
+        :return:
+        """
+        for _ in range(n):
+            c = Cell.make_random(self.bounds)
+            self.add_cell(c)
 
-    def remove_cell(self, cell):
-        try:
-            self.__pos_to_chunk(cell.pos).cells.remove(cell)
-            self.num_cells -= 1
-        except ValueError:
-            pass
-
-    def remove_virus(self, virus):
-        try:
-            self.__pos_to_chunk(virus.pos).cells.remove(virus)
-            self.num_viruses -= 1
-        except ValueError:
-            pass
-
-    def copy_for_client(self, pos):
-        chunks = self.__nearby_chunks(pos)
-        players = list()
-        cells = list()
-        for chunk in chunks:
-            players.extend(chunk.players)
-            cells.extend(chunk.cells)
-
-        model = Model(players, cells, self.bounds, self.chunk_size)
-        model.round_start = self.round_start
-        return model
-
-    def __reset_players(self):
-        for player in self.players:
-            player.reset()
-
-    def __pos_to_chunk(self, pos):
-        chunk_pos = self.__chunk_pos(pos)
-        return self.chunks[chunk_pos[0]][chunk_pos[1]]
-
-    def __chunk_pos(self, pos):
-        return [
-            int((pos[0] + self.bounds[0]) // self.chunk_size),
-            int((pos[1] + self.bounds[1]) // self.chunk_size)]
-
-    def __nearby_chunks(self, pos):
-        chunks = list()
-        chunk_pos = self.__chunk_pos(pos)
-
-        def is_valid_chunk_pos(pos):
-            if pos[0] >= 0 and pos[0] < len(self.chunks) and \
-                    pos[1] >= 0 and pos[1] < len(self.chunks[0]):
-                return True
-            return False
-
-        for diff in itertools.product([-1, 0, 1], repeat=2):
-            pos = [chunk_pos[0] + diff[0], chunk_pos[1] + diff[1]]
-            if is_valid_chunk_pos(pos):
-                chunks.append(self.chunks[pos[0]][pos[1]])
-        
-        return chunks
+    def spawn_viruses(self, n):
+        """
+        Spawns n viruses randomly distributed within the map bounds.
+        :param n:
+        :return:
+        """
+        for _ in range(n):
+            v = Virus.make_random(self.bounds)
+            self.add_virus(v)
 
     @property
     def cells(self):
+        """
+        Returns a list of all cells in the model.
+        :return:
+        """
         cells = list()
         for chunks_line in self.chunks:
             for chunk in chunks_line:
@@ -230,10 +401,25 @@ class Model():
         return cells
 
     @property
-    def players(self):
-        players = list()
+    def playercells(self):
+        """
+        Returns a list of all playercells in the model.
+        :return:
+        """
+        playercells = list()
         for chunks_line in self.chunks:
             for chunk in chunks_line:
-                players.extend(chunk.players)
-        return players
-    
+                playercells.extend(chunk.playercells)
+        return playercells
+
+    @property
+    def viruses(self):
+        """
+        Returns a list of all viruses in the model.
+        :return:
+        """
+        viruses = list()
+        for chunks_line in self.chunks:
+            for chunk in chunks_line:
+                viruses.extend(chunk.viruses)
+        return viruses

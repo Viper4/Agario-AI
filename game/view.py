@@ -1,5 +1,4 @@
 import math
-import time
 
 import pygame
 import pygame.gfxdraw
@@ -68,32 +67,16 @@ class View():
         self.screen.fill(View.BACKGROUND_COLOR)
         self.draw_grid()
         for cell in self.model.cells:
-            if cell is None:
-                continue
             self.draw_cell(cell)
         for virus in self.model.viruses:
-            if virus is None:
-                continue
             self.draw_cell(virus)
-        for player in self.model.players:
-            if player is None:
-                continue
-            self.draw_player(player)
+        for playercell in self.model.playercells:
+            self.draw_cell(playercell)
         # self.draw_object(self.model.player)
         self.draw_hud((8, 5))
         if self.debug:
             self.draw_debug_info()
-        self.draw_messages()
         pygame.display.flip()
-
-    def draw_messages(self):
-        if time.time() - self.model.round_start <= self.MESSAGE_EXPIRE_TIME:
-            self.draw_text(
-                self.screen,
-                "New round started!",
-                [self.width // 2, self.height // 2 * 0.1],
-                self.MESSAGE_COLOR,
-                align_center=True)  
 
     def draw_grid(self, step=25):
         """Draw grid on screen with passed step."""
@@ -166,13 +149,11 @@ class View():
         # draw leaderboard HUD item
         lines = list()
         lines.append('Leaderboard')
-        to_sort = []
-        for player in self.model.players:
-            if player is None:
-                continue
-            to_sort.append(player)
+        players = set()
+        for playercell in self.model.playercells:
+            players.add(playercell.parent)
         top10 = sorted(
-            to_sort,
+            list(players),
             key=lambda pl: pl.score(),
             reverse=True)[:10]
         for i, player in enumerate(top10):

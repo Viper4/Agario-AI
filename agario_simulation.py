@@ -3,7 +3,7 @@ import time
 import torch
 from tqdm import tqdm
 from game.opencv_view import OCView
-from game.new_model import Model
+from game.model import Model
 from game.entities import Player
 from geometry_utils import Vector
 
