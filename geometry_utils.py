@@ -119,12 +119,24 @@ class GameObject:
                 self.count == other.count)
 
 
-def get_distance(p1: Vector, p2: Vector):
+def sqr_distance(p1: Vector, p2: Vector):
     """
-    Calculates linear distance between Vector 1 and Vector 2
+    Calculates square distance from p1 to p2.
+    :param p1:
+    :param p2:
+    :return:
+    """
+    dx = p2.x - p1.x
+    dy = p2.y - p1.y
+    return dx * dx + dy * dy
+
+
+def distance(p1: Vector, p2: Vector):
+    """
+    Calculates distance between p1 and p2
     :param p1:
     :param p2:
     :return: float distance
     """
-    return ((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2) ** 0.5
+    return math.sqrt(sqr_distance(p1, p2))
 

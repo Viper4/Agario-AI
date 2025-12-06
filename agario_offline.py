@@ -9,18 +9,6 @@ from game.model import Model
 from game.entities import Player
 
 
-def game_loop(food_count: int, virus_count: int, model: Model):
-    while True:
-        # Maintain virus count
-        if model.num_viruses < virus_count:
-            model.spawn_viruses(virus_count - model.num_viruses)
-
-        # Maintain food count
-        if model.num_cells < food_count:
-            model.spawn_cells(food_count - model.num_cells)
-        time.sleep(0.1)
-
-
 def main():
     parser = argparse.ArgumentParser(description="Offline Agar.io (no networking)")
     parser.add_argument('-wt', '--width', dest='width', type=int, default=900, help='screen width')
@@ -67,16 +55,12 @@ def main():
             model.update()
             time.sleep(0.008333)  # 60 FPS
     else:
-        # Start game loop
-        game_loop_thread = threading.Thread(target=game_loop, args=(args.food, args.viruses, model), daemon=True)
-        game_loop_thread.start()
-
         # Start view loop (handles input: mouse to move, W to shoot, SPACE to split)
         pygame.init()
         screen = pygame.display.set_mode((args.width, args.height))
         pygame.display.set_caption('Agar.io Offline')
         view = View(screen, model, player, debug=False)
-        view.start_human_game()
+        view.start_human_game(args.food, args.viruses)
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 import time
 import threading
-
+import math
 import geometry_utils
 from image_processing import ImageProcessing
 from web_scraper import WebScraper
@@ -321,7 +321,9 @@ class RNNAgent(BaseAgent):
 
 
 class ModelBasedReflexAgent(BaseAgent):
-    """Model-based reflex agent using rule-based decision making instead of neural networks."""
+    """
+    Model-based reflex agent using rule-based decision making instead of neural networks.
+    """
 
     VIRUS_DANGER_SIZE = 150.0
     THREAT_SIZE_RATIO = 1.1
@@ -336,7 +338,7 @@ class ModelBasedReflexAgent(BaseAgent):
         self.my_area = 0.0
         self.last_action = (0.0, 0.0, 0.0, 0.0)
 
-    def get_action(self, objects: list[geometry_utils.GameObject], my_area: float = None):
+    def get_action(self, objects: list[geometry_utils.GameObject], my_pos: geometry_utils.Vector, my_area: float = None):
         """
         Rule-based decision logic.
         :param objects: List of visible game objects with normalized positions [-1, 1]
@@ -375,8 +377,8 @@ class ModelBasedReflexAgent(BaseAgent):
 
         # Rule 1: Flee from threats (highest priority)
         if threats:
-            closest_threat = min(threats, key=lambda o: self._get_distance(o))
-            threat_dist = self._get_distance(closest_threat)
+            closest_threat = min(threats, key=lambda o: geometry_utils.sqr_distance(my_pos, o.pos))
+            threat_dist = geometry_utils.sqr_distance(my_pos, closest_threat.pos)
             if threat_dist > 0:
                 urgency = max(0.5, 1.0 - threat_dist)
                 move_x = -closest_threat.pos.x * urgency
@@ -384,8 +386,8 @@ class ModelBasedReflexAgent(BaseAgent):
 
         # Rule 2: Chase prey
         elif prey:
-            closest_prey = min(prey, key=lambda o: self._get_distance(o))
-            prey_dist = self._get_distance(closest_prey)
+            closest_prey = min(prey, key=lambda o: geometry_utils.sqr_distance(my_pos, o.pos))
+            prey_dist = geometry_utils.sqr_distance(my_pos, closest_prey.pos)
             move_x = closest_prey.pos.x
             move_y = closest_prey.pos.y
 
@@ -397,38 +399,28 @@ class ModelBasedReflexAgent(BaseAgent):
 
         # Rule 3: Eat food
         elif foods:
-            best_food = max(foods, key=lambda o: o.count / (self._get_distance(o) + 0.1))
+            best_food = max(foods, key=lambda o: o.count / (geometry_utils.sqr_distance(my_pos, o.pos) + 0.1))
             move_x = best_food.pos.x
             move_y = best_food.pos.y
 
         # Virus avoidance (when large enough)
         if viruses and self.my_area > self.VIRUS_DANGER_SIZE:
             for virus in viruses:
-                virus_dist = self._get_distance(virus)
+                virus_dist = geometry_utils.sqr_distance(my_pos, virus.pos)
                 if virus_dist < self.VIRUS_AVOID_DISTANCE:
                     avoid_strength = (self.VIRUS_AVOID_DISTANCE - virus_dist) / self.VIRUS_AVOID_DISTANCE
                     move_x -= virus.pos.x * avoid_strength * 0.5
                     move_y -= virus.pos.y * avoid_strength * 0.5
 
-        # Normalize movement vector
-        length = (move_x ** 2 + move_y ** 2) ** 0.5
-        if length > 1.0:
-            move_x /= length
-            move_y /= length
-
         self.last_action = (move_x, move_y, split, eject)
         return self.last_action
 
-    def _get_distance(self, obj: geometry_utils.GameObject) -> float:
-        """Calculate distance to object based on normalized coordinates."""
-        return (obj.pos.x ** 2 + obj.pos.y ** 2) ** 0.5
-
-    def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, highest_mass: float) -> float:
+    def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, score: float) -> float:
         """Calculate fitness score based on game statistics."""
         return (self.fitness_weights.food * food_eaten +
                 self.fitness_weights.time_alive * time_alive +
                 self.fitness_weights.cells_eaten * cells_eaten +
-                self.fitness_weights.highest_mass * highest_mass)
+                self.fitness_weights.score * score)
 
     def run_web_game(self, visualize: bool):
         """

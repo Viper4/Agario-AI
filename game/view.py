@@ -184,9 +184,17 @@ class View():
         # bilt on main surface
         self.screen.blit(item_surface, pos)
     
-    def start_human_game(self):
+    def start_human_game(self, food_count, virus_count):
         """Start game loop for human players."""
         while True:
+            # Maintain virus count
+            if self.model.num_viruses < virus_count:
+                self.model.spawn_viruses(virus_count - self.model.num_viruses)
+
+            # Maintain food count
+            if self.model.num_cells < food_count:
+                self.model.spawn_cells(food_count - self.model.num_cells)
+
             events = pygame.event.get()
             for event in events:
                 if event.type == pygame.QUIT:
