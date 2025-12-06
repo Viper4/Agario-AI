@@ -22,11 +22,11 @@ class Hyperparameters:
 
 
 class FitnessWeights:
-    def __init__(self, food: float, time_alive: float, cells_eaten: float, highest_mass: float, death: float):
+    def __init__(self, food: float, time_alive: float, cells_eaten: float, score: float, death: float):
         self.food = food
         self.time_alive = time_alive
         self.cells_eaten = cells_eaten
-        self.highest_mass = highest_mass
+        self.score = score
         self.death = death
 
 
@@ -96,7 +96,7 @@ class BaseAgent(threading.Thread):
                     self.fitness = (food_eaten * self.fitness_weights.food +
                                     time_alive * self.fitness_weights.time_alive +
                                     cells_eaten * self.fitness_weights.cells_eaten +
-                                    highest_mass * self.fitness_weights.highest_mass)
+                                    highest_mass * self.fitness_weights.score)
                     self.alive = False
                     return self.fitness
             time.sleep(self.run_interval)
@@ -207,8 +207,8 @@ class RNNAgent(BaseAgent):
 
     def reduce_sigma(self, factor: float):
         """
-        Reduce the standard deviation of mutation to the agent as the agent becomes more fit.
-        :param factor: factor to reduce learning rate by
+        Reduce the standard deviation of mutation as the agent becomes more fit.
+        :param factor: factor to reduce standard deviation by
         """
         for mutation in self.hyperparameters.param_mutations:
             self.hyperparameters.param_mutations[mutation] *= factor
@@ -228,20 +228,20 @@ class RNNAgent(BaseAgent):
             noise = torch.randn_like(param) * sigma  # Gaussian noise
             param.data.add_(noise)
 
-    def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, highest_mass: float, died: int):
+    def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, score: float, died: int):
         """
         Calculates the fitness of the agent based on the given statistics.
         :param food_eaten: Number of food eaten
         :param time_alive: Proportion of time alive out of total game time (0 to 1)
         :param cells_eaten: Number of cells eaten
-        :param highest_mass: Highest mass achieved
+        :param score: Score achieved
         :param died: Binary death indicator (0 or 1)
         :return: Fitness score
         """
         return (self.fitness_weights.food * food_eaten +
                 self.fitness_weights.time_alive * time_alive +
                 self.fitness_weights.cells_eaten * cells_eaten +
-                self.fitness_weights.highest_mass * highest_mass
+                self.fitness_weights.score * score
                 - self.fitness_weights.death * died)
 
     def init_grid(self):
@@ -287,49 +287,6 @@ class RNNAgent(BaseAgent):
         move_x, move_y, split, eject = output[0].detach().cpu().numpy()
         return float(move_x), float(move_y), float(split), float(eject)
 
-        '''max_input_objects = self.hyperparameters.input_size // 8
-
-        # Convert objects list to tensor input for the network
-        x = torch.zeros((1, self.hyperparameters.input_size)).to(self.device)
-        # 8 input nodes per object
-        # The 8 nodes are formatted: (food, virus, player, relative pos x, relative pos y, area, perimeter, count)
-        i = 0
-
-        while i < max_input_objects and i < len(objects):
-            obj = objects[i]
-
-            # Encode label as one-hot
-            nodes = [0, 0, 0,
-                     obj.pos.x,
-                     obj.pos.y,
-                     obj.area,
-                     obj.perimeter,
-                     obj.count]
-            if obj.label == "food":
-                nodes[0] = 1
-            elif obj.label == "player":
-                nodes[1] = 1
-            elif obj.label == "virus":
-                nodes[2] = 1
-
-            # Insert into x tensor
-            start = i * 8
-            end = start + 8
-            x[0, start:end] = torch.tensor(nodes, dtype=torch.float32).to(self.device)
-            i += 1
-
-        # Feed the input through the network
-        x = x.unsqueeze(1)  # (batch, input_size) -> (batch, seq_len=1, input_size)
-        output = self.forward(x)
-
-        # Take action with output: (move x, move y, split, eject)
-        arr = output[0].detach().cpu().numpy()
-        move_x = float(arr[0])
-        move_y = float(arr[1])
-        split = float(arr[2])
-        eject = float(arr[3])
-        return move_x, move_y, split, eject'''
-
     def run_web_game(self, visualize: bool):
         """
         Runs a single game for this agent on agar.io using the web scraper.
@@ -356,8 +313,8 @@ class RNNAgent(BaseAgent):
                         print("Warning: Failed to get stats for agent")
                         self.alive = False
                         return None
-                    food_eaten, time_alive, cells_eaten, highest_mass = stats
-                    self.fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass, int(not self.alive))
+                    food_eaten, time_alive, cells_eaten, score = stats
+                    self.fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, score, int(not self.alive))
                     self.alive = False
                     return self.fitness
             time.sleep(self.run_interval)

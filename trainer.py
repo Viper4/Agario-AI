@@ -69,7 +69,7 @@ class GeneticTrainer:
         """
         children = []
         for i in range(num_children):
-            child = RNNAgent(self.hyperparameters, fitness_weights=self.fitness_weights,
+            child = RNNAgent(parent1.hyperparameters, fitness_weights=parent1.fitness_weights,
                              randomize_params=False, device=torch.device("cpu"))
 
             # Crossover from both parents
@@ -160,7 +160,13 @@ class GeneticTrainer:
 
             # Create new population
             new_population = []
-            num_parents = self.population_size // 2
+
+            # Elitism
+            num_elites = self.population_size // 20
+            for i in range(num_elites):
+                new_population.append(self.population[i])
+
+            num_parents = self.population_size // 2 - num_elites  # Number of parents to reproduce from
             for i in range(0, num_parents, 2):
                 if i+1 >= self.population_size:
                     break
@@ -186,10 +192,6 @@ class GeneticTrainer:
                     children = self.reproduce(parent1, parent2, 1)
                     new_population.extend(children)
 
-            # Elitism
-            num_elites = self.population_size // 20
-            new_population[-num_elites:] = self.population[:num_elites]
-
             self.population = new_population
             generation += 1
         return self.population
@@ -204,7 +206,7 @@ if __name__ == "__main__":
                                       move_sensitivity=50.0,
                                       grid_width=9,
                                       grid_height=6)
-    fitness_weights = FitnessWeights(food=0.1, time_alive=10.0, cells_eaten=20.0, highest_mass=1.0, death=100.0)
+    fitness_weights = FitnessWeights(food=0.1, time_alive=10.0, cells_eaten=20.0, score=1.0, death=100.0)
 
     trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
                              hyperparameters=hyperparameters,
