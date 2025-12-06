@@ -58,7 +58,24 @@ class BaseAgent(threading.Thread):
         self.image_processor = ImageProcessing()
 
         self.fitness_weights = fitness_weights
-        self.fitness = 0.0
+        self.fitnesses = []  # List of fitnesses for each simulation
+        self.avg_fitness = 0.0
+
+    def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, score: float, died: int):
+        """
+        Calculates the fitness of the agent based on the given statistics.
+        :param food_eaten: Number of food eaten
+        :param time_alive: Proportion of time alive out of total game time (0 to 1)
+        :param cells_eaten: Number of cells eaten
+        :param score: Score achieved
+        :param died: Binary death indicator (0 or 1)
+        :return: Fitness score
+        """
+        return (self.fitness_weights.food * food_eaten +
+                self.fitness_weights.time_alive * time_alive +
+                self.fitness_weights.cells_eaten * cells_eaten +
+                self.fitness_weights.score * score
+                - self.fitness_weights.death * died)
 
     def start_web_game(self):
         """
@@ -110,12 +127,9 @@ class BaseAgent(threading.Thread):
                         self.alive = False
                         return None
                     food_eaten, time_alive, cells_eaten, highest_mass = stats
-                    self.fitness = (food_eaten * self.fitness_weights.food +
-                                    time_alive * self.fitness_weights.time_alive +
-                                    cells_eaten * self.fitness_weights.cells_eaten +
-                                    highest_mass * self.fitness_weights.score)
+                    fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass, 1)
                     self.alive = False
-                    return self.fitness
+                    return fitness
             time.sleep(self.run_interval)
 
 
@@ -229,22 +243,6 @@ class RNNAgent(BaseAgent):
             noise = torch.randn_like(param) * sigma  # Gaussian noise
             param.data.add_(noise)
 
-    def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, score: float, died: int):
-        """
-        Calculates the fitness of the agent based on the given statistics.
-        :param food_eaten: Number of food eaten
-        :param time_alive: Proportion of time alive out of total game time (0 to 1)
-        :param cells_eaten: Number of cells eaten
-        :param score: Score achieved
-        :param died: Binary death indicator (0 or 1)
-        :return: Fitness score
-        """
-        return (self.fitness_weights.food * food_eaten +
-                self.fitness_weights.time_alive * time_alive +
-                self.fitness_weights.cells_eaten * cells_eaten +
-                self.fitness_weights.score * score
-                - self.fitness_weights.death * died)
-
     def init_grid(self):
         """
         Generates an empty grid of shape (grid_width, grid_height, nodes_per_cell)
@@ -314,9 +312,9 @@ class RNNAgent(BaseAgent):
                         self.alive = False
                         return None
                     food_eaten, time_alive, cells_eaten, score = stats
-                    self.fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, score, int(not self.alive))
+                    fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, score, int(not self.alive))
                     self.alive = False
-                    return self.fitness
+                    return fitness
             time.sleep(self.run_interval)
 
 
@@ -415,13 +413,6 @@ class ModelBasedReflexAgent(BaseAgent):
         self.last_action = (move_x, move_y, split, eject)
         return self.last_action
 
-    def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, score: float) -> float:
-        """Calculate fitness score based on game statistics."""
-        return (self.fitness_weights.food * food_eaten +
-                self.fitness_weights.time_alive * time_alive +
-                self.fitness_weights.cells_eaten * cells_eaten +
-                self.fitness_weights.score * score)
-
     def run_web_game(self, visualize: bool):
         """
         Run the agent on the real agar.io website using web scraper.
@@ -462,13 +453,13 @@ class ModelBasedReflexAgent(BaseAgent):
                         return None
 
                     food_eaten, time_alive, cells_eaten, highest_mass = stats
-                    self.fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass)
+                    fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass, 1)
 
-                    print(f"Fitness: {self.fitness:.2f} (Food: {food_eaten}, Time: {time_alive}s, "
+                    print(f"Fitness: {fitness:.2f} (Food: {food_eaten}, Time: {time_alive}s, "
                           f"Cells: {cells_eaten}, Max Mass: {highest_mass})")
 
                     self.alive = False
-                    return self.fitness
+                    return fitness
 
             time.sleep(self.run_interval)
 

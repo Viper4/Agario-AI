@@ -102,7 +102,8 @@ class GeneticTrainer:
         self.init_agents(load_from_file)
 
         while self.max_generations is None or generation < self.max_generations:
-            total_sim_fitnesses = [0.0] * self.population_size  # Element at i = total fitness of agent i over all simulations
+            for i in range(self.population_size):
+                self.population[i].fitnesses.clear()
 
             # Run simulations in parallel, one worker per simulation
             # Prepare state dicts of agents
@@ -121,13 +122,9 @@ class GeneticTrainer:
                 pool.close()  # no more tasks
                 # Wait for all jobs to finish and collect fitness
                 for job in tqdm(jobs, desc=f"Generation {generation}", total=num_simulations, unit="sims"):
-                    try:
-                        sim_fitnesses = job.get()
-                        for i in range(self.population_size):
-                            total_sim_fitnesses[i] += sim_fitnesses[i]
-                    except TimeoutError:
-                        # job still running, loop back to allow keyboard interrupt checking
-                        continue
+                    sim_fitnesses = job.get()
+                    for i in range(self.population_size):
+                        self.population[i].fitnesses.append(sim_fitnesses[i])
 
                 pool.join()
             except KeyboardInterrupt:
@@ -138,20 +135,43 @@ class GeneticTrainer:
 
             total_final_fitness = 0.0
             for i in range(self.population_size):
-                self.population[i].fitness = total_sim_fitnesses[i] / num_simulations
-                total_final_fitness += self.population[i].fitness
+                self.population[i].avg_fitness = sum(self.population[i].fitnesses) / num_simulations
+                total_final_fitness += self.population[i].avg_fitness
 
             # Print generation statistics
-            self.population.sort(key=lambda x: x.fitness, reverse=True)
+            self.population.sort(key=lambda x: x.avg_fitness, reverse=True)
+
+            num_elites = self.population_size // 20
+            num_parents = self.population_size // 2 - num_elites
+            child_counts = []
+            for i in range(0, self.population_size, 2):
+                if i+1 < num_parents:
+                    # Linear allocation based on rank
+                    a = 4
+                    b = a / num_parents
+                    num_children = round(a-b*i + a-b*(i+1))
+                    child_counts.append(num_children)
+                    child_counts.append(num_children)
+                else:
+                    child_counts.append(0)
+                    child_counts.append(0)
 
             print(f"Generation {generation} complete")
             print(f"Mean fitness: {total_final_fitness / self.population_size:.2f}")
-            print(f"Fitness standard deviation: {np.std([x.fitness for x in self.population]).item():.4f}")
-            print(f"Rank\t\t|\t\tFitness")
-            print("-" * 40)
+            print(f"Fitness standard deviation: {np.std([x.avg_fitness for x in self.population]).item():.4f}")
+            print(f"Mutation strengths: {self.population[0].hyperparameters.param_mutations}")
+            individual_string = ""
+            for i in range(num_simulations):
+                individual_string += "\t|\tSim " + str(i+1) + " Fitness"
+            label_string = f"Rank\t|\tAvg Fitness{individual_string}\t|\tChildren"
+            print(label_string)
+            print("-" * (len(label_string)+50))
             for i in range(self.population_size):
-                print(f"{i}\t\t|\t\t{repr(self.population[i].fitness)}")
-            print("-" * 40)
+                fitnesses_string = ""
+                for j in range(num_simulations):
+                    fitnesses_string += f"\t|\t{repr(self.population[i].fitnesses[j] + 0.0000000001)[:10]}"
+                print(f"{i}\t|\t{repr(self.population[i].avg_fitness + 0.0000000001)[:10]}{fitnesses_string}\t|\t{child_counts[i]}")
+            print("-" * (len(label_string)+50))
 
             # Save agent parameters to file
             with open("agent_snapshots.pkl", "wb") as f:
@@ -162,11 +182,9 @@ class GeneticTrainer:
             new_population = []
 
             # Elitism
-            num_elites = self.population_size // 20
             for i in range(num_elites):
                 new_population.append(self.population[i])
 
-            num_parents = self.population_size // 2 - num_elites  # Number of parents to reproduce from
             for i in range(0, num_parents, 2):
                 if i+1 >= self.population_size:
                     break
@@ -207,7 +225,7 @@ if __name__ == "__main__":
                                       grid_width=9,
                                       grid_height=6,
                                       nodes_per_cell=4)
-    fitness_weights = FitnessWeights(food=0.1, time_alive=10.0, cells_eaten=20.0, score=1.0, death=100.0)
+    fitness_weights = FitnessWeights(food=0.5, time_alive=100.0, cells_eaten=50.0, score=0.75, death=500.0)
 
     trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
                              hyperparameters=hyperparameters,
