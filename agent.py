@@ -321,6 +321,163 @@ class RNNAgent(BaseAgent):
 
 
 class ModelBasedReflexAgent(BaseAgent):
-    def __init__(self, run_interval: float, fitness_weights: FitnessWeights):
-        super().__init__(run_interval, fitness_weights)
+    """Model-based reflex agent using rule-based decision making instead of neural networks."""
 
+    VIRUS_DANGER_SIZE = 150.0
+    THREAT_SIZE_RATIO = 1.1
+    PREY_SIZE_RATIO = 0.8
+    SPLIT_DISTANCE_THRESHOLD = 0.3
+    VIRUS_AVOID_DISTANCE = 0.4
+    SPLIT_SIZE_RATIO = 2.5
+
+    def __init__(self, run_interval: float, fitness_weights: FitnessWeights, move_sensitivity: float = 50.0):
+        super().__init__(run_interval, fitness_weights)
+        self.move_sensitivity = move_sensitivity
+        self.my_area = 0.0
+        self.last_action = (0.0, 0.0, 0.0, 0.0)
+
+    def get_action(self, objects: list[geometry_utils.GameObject], my_area: float = None):
+        """
+        Rule-based decision logic.
+        :param objects: List of visible game objects with normalized positions [-1, 1]
+        :param my_area: Current area of the agent
+        :return: tuple of (move_x, move_y, split, eject)
+        """
+        if my_area is not None:
+            self.my_area = my_area
+
+        move_x, move_y = 0.0, 0.0
+        split, eject = 0.0, 0.0
+
+        if not objects:
+            self.last_action = (0.0, 0.0, 0.0, 0.0)
+            return self.last_action
+
+        # Classify nearby objects
+        foods = []
+        threats = []
+        prey = []
+        viruses = []
+
+        for obj in objects:
+            if obj.label == "food":
+                foods.append(obj)
+            elif obj.label == "virus":
+                viruses.append(obj)
+            elif obj.label == "player":
+                if self.my_area > 0:
+                    if obj.area > self.my_area * self.THREAT_SIZE_RATIO:
+                        threats.append(obj)
+                    elif obj.area < self.my_area * self.PREY_SIZE_RATIO:
+                        prey.append(obj)
+                else:
+                    threats.append(obj)
+
+        # Rule 1: Flee from threats (highest priority)
+        if threats:
+            closest_threat = min(threats, key=lambda o: self._get_distance(o))
+            threat_dist = self._get_distance(closest_threat)
+            if threat_dist > 0:
+                urgency = max(0.5, 1.0 - threat_dist)
+                move_x = -closest_threat.pos.x * urgency
+                move_y = -closest_threat.pos.y * urgency
+
+        # Rule 2: Chase prey
+        elif prey:
+            closest_prey = min(prey, key=lambda o: self._get_distance(o))
+            prey_dist = self._get_distance(closest_prey)
+            move_x = closest_prey.pos.x
+            move_y = closest_prey.pos.y
+
+            # Split attack if close enough and can eat after split
+            if prey_dist < self.SPLIT_DISTANCE_THRESHOLD:
+                half_my_area = self.my_area / 2.0
+                if half_my_area > closest_prey.area * self.SPLIT_SIZE_RATIO:
+                    split = 1.0
+
+        # Rule 3: Eat food
+        elif foods:
+            best_food = max(foods, key=lambda o: o.count / (self._get_distance(o) + 0.1))
+            move_x = best_food.pos.x
+            move_y = best_food.pos.y
+
+        # Virus avoidance (when large enough)
+        if viruses and self.my_area > self.VIRUS_DANGER_SIZE:
+            for virus in viruses:
+                virus_dist = self._get_distance(virus)
+                if virus_dist < self.VIRUS_AVOID_DISTANCE:
+                    avoid_strength = (self.VIRUS_AVOID_DISTANCE - virus_dist) / self.VIRUS_AVOID_DISTANCE
+                    move_x -= virus.pos.x * avoid_strength * 0.5
+                    move_y -= virus.pos.y * avoid_strength * 0.5
+
+        # Normalize movement vector
+        length = (move_x ** 2 + move_y ** 2) ** 0.5
+        if length > 1.0:
+            move_x /= length
+            move_y /= length
+
+        self.last_action = (move_x, move_y, split, eject)
+        return self.last_action
+
+    def _get_distance(self, obj: geometry_utils.GameObject) -> float:
+        """Calculate distance to object based on normalized coordinates."""
+        return (obj.pos.x ** 2 + obj.pos.y ** 2) ** 0.5
+
+    def calculate_fitness(self, food_eaten: int, time_alive: float, cells_eaten: int, highest_mass: float) -> float:
+        """Calculate fitness score based on game statistics."""
+        return (self.fitness_weights.food * food_eaten +
+                self.fitness_weights.time_alive * time_alive +
+                self.fitness_weights.cells_eaten * cells_eaten +
+                self.fitness_weights.highest_mass * highest_mass)
+
+    def run_web_game(self, visualize: bool):
+        """
+        Run the agent on the real agar.io website using web scraper.
+        :param visualize: Whether to show visualization window
+        :return: Final fitness score or None if stats retrieval fails
+        """
+        self.start_web_game()
+
+        while self.program_running:
+            if self.scraper.in_game():
+                self.alive = True
+                objects = self.get_web_game_data(visualize=visualize)
+
+                # Estimate own size from nearby player objects
+                estimated_area = 400.0
+                for obj in objects:
+                    if obj.label == "player" and abs(obj.pos.x) < 0.1 and abs(obj.pos.y) < 0.1:
+                        estimated_area = obj.area
+                        break
+
+                move_x, move_y, split, eject = self.get_action(objects, estimated_area)
+
+                self.scraper.move(move_x * self.move_sensitivity,
+                                  move_y * self.move_sensitivity, 5)
+
+                if split > 0:
+                    self.scraper.press_space()
+                if eject > 0:
+                    self.scraper.press_w()
+            else:
+                if self.alive:
+                    print("ModelBasedReflexAgent died. Calculating fitness...")
+                    stats = self.scraper.get_stats(wait=True)
+
+                    if stats is None:
+                        print("Warning: Failed to get stats for agent")
+                        self.alive = False
+                        return None
+
+                    food_eaten, time_alive, cells_eaten, highest_mass = stats
+                    self.fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass)
+
+                    print(f"Fitness: {self.fitness:.2f} (Food: {food_eaten}, Time: {time_alive}s, "
+                          f"Cells: {cells_eaten}, Max Mass: {highest_mass})")
+
+                    self.alive = False
+                    return self.fitness
+
+            time.sleep(self.run_interval)
+
+        return None
