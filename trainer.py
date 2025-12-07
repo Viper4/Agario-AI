@@ -13,17 +13,17 @@ from tqdm import tqdm
 # Function needs to be picklable so keep it out of classes
 def run_simulation_worker(fps: int, simulation_duration: float, agent_snapshots: list[dict], pickled_data: bytes, headless: bool):
     hyperparameters, fitness_weights = pickle.loads(pickled_data)
-    agents = []
+    rnn_agents = []
     for agent_snapshot in agent_snapshots:
         # Reconstruct agent from snapshot
         agent = RNNAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))  # Overhead of moving to GPU is too high
         agent.rnn.load_state_dict(agent_snapshot)  # Load agent parameters from snapshot
-        agents.append(agent)
+        rnn_agents.append(agent)
     sim = agario_simulation.AgarioSimulation(view_width=900, view_height=600,
                                              bounds=1500,
                                              food_count=600,
                                              virus_count=20)
-    return sim.run_rnn(agents, fps, simulation_duration, headless)
+    return sim.run(rnn_agents, len(rnn_agents) // 5, fps, simulation_duration, headless)
 
 
 class GeneticTrainer:

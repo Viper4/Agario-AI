@@ -151,9 +151,9 @@ class Player:
         self.parts[0].radius = self.START_SIZE
 
     @classmethod
-    def make_random(cls, nick, bounds, start_size=START_SIZE):
+    def make_random(cls, nick, bounds, start_size=START_SIZE, color=None):
         """Returns random player with given nick."""
-        player_cell = PlayerCell.make_random(bounds)
+        player_cell = PlayerCell.make_random(bounds, color)
         player_cell.radius = start_size
         return cls(nick, player_cell)
 

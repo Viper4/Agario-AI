@@ -21,6 +21,14 @@ class Vector:
         magnitude = self.magnitude()
         return Vector(self.x / magnitude, self.y / magnitude)
 
+    def sqr_distance(self, other):
+        dx = self.x - other.x
+        dy = self.y - other.y
+        return dx * dx + dy * dy
+
+    def distance(self, other):
+        return math.sqrt(self.sqr_distance(other))
+
     def __add__(self, other):
         return Vector(self.x + other.x, self.y + other.y)
 
@@ -44,7 +52,7 @@ class Vector:
 
 
 class GameObject:
-    def __init__(self, label: str, pos: Vector, area: float, perimeter: float, circularity: float, count: int, bounding_box: tuple[Vector, Vector]):
+    def __init__(self, label: str, pos: Vector, area: float, perimeter: float, circularity: float, count: int, bounding_box: tuple[Vector, Vector] | None):
         self.label = label
         self.pos = pos
         self.area = area
@@ -119,24 +127,28 @@ class GameObject:
                 self.count == other.count)
 
 
-def sqr_distance(p1: Vector, p2: Vector):
+def sqr_distance(x1: float, y1: float, x2: float, y2: float):
     """
-    Calculates square distance from p1 to p2.
-    :param p1:
-    :param p2:
+    Calculates square distance from point (x1, y1) to (x2, y2)
+    :param x1:
+    :param y1:
+    :param x2:
+    :param y2:
     :return:
     """
-    dx = p2.x - p1.x
-    dy = p2.y - p1.y
+    dx = x1 - x2
+    dy = y1 - y2
     return dx * dx + dy * dy
 
 
-def distance(p1: Vector, p2: Vector):
+def distance(x1: float, y1: float, x2: float, y2: float):
     """
-    Calculates distance between p1 and p2
-    :param p1:
-    :param p2:
-    :return: float distance
+    Calculates distance from point (x1, y1) to (x2, y2)
+    :param x1:
+    :param y1:
+    :param x2:
+    :param y2:
+    :return:
     """
-    return math.sqrt(sqr_distance(p1, p2))
+    return math.sqrt(sqr_distance(x1, y1, x2, y2))
 

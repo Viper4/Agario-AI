@@ -2,6 +2,7 @@ import time
 import threading
 import geometry_utils
 import random
+import math
 import torch
 from image_processing import ImageProcessing
 from web_scraper import WebScraper
@@ -252,15 +253,15 @@ class RNNAgent(BaseAgent):
                            device=self.device,
                            dtype=torch.float32)
 
-    def get_grid_index(self, pos: geometry_utils.Vector):
+    def get_grid_index(self, pos: tuple[float, float]):
         """
         Converts given position from [-1, 1] to grid index (x, y)
         :param pos: Vector position to convert
         :return:
         """
         # Convert pos.x/y in [-1,1] to grid index 0..GRID_SIZE-1
-        gx = int((pos.x + 1) * 0.5 * (self.hyperparameters.grid_width - 1))
-        gy = int((pos.y + 1) * 0.5 * (self.hyperparameters.grid_height - 1))
+        gx = int((pos[0] + 1) * 0.5 * (self.hyperparameters.grid_width - 1))
+        gy = int((pos[1] + 1) * 0.5 * (self.hyperparameters.grid_height - 1))
 
         # Safety clamp (just in case)
         gx = max(0, min(self.hyperparameters.grid_width - 1, gx))
@@ -332,12 +333,11 @@ class ModelBasedReflexAgent(BaseAgent):
     Model-based reflex agent using rule-based decision making instead of neural networks.
     """
 
-    VIRUS_DANGER_SIZE = 150.0
+    VIRUS_DANGER_SIZE = 300.0
     THREAT_SIZE_RATIO = 1.1
-    PREY_SIZE_RATIO = 0.8
-    SPLIT_DISTANCE_THRESHOLD = 0.3
-    VIRUS_AVOID_DISTANCE = 0.4
-    SPLIT_SIZE_RATIO = 2.5
+    PREY_SIZE_RATIO = 0.83
+    SPLIT_DISTANCE_THRESHOLD = 350.0
+    VIRUS_AVOID_DISTANCE = 100.0
 
     def __init__(self, run_interval: float, fitness_weights: FitnessWeights, move_sensitivity: float = 50.0):
         super().__init__(run_interval, fitness_weights)
@@ -345,81 +345,70 @@ class ModelBasedReflexAgent(BaseAgent):
         self.my_area = 0.0
         self.last_action = (0.0, 0.0, 0.0, 0.0)
 
-    def get_action(self, objects: list[geometry_utils.GameObject], my_pos: geometry_utils.Vector, my_area: float = None):
+    def get_action(self, threats: list, prey: list, foods: list, viruses: list, my_pos: tuple[float, float], min_area: float, max_area: float, my_radius: float):
         """
         Rule-based decision logic.
-        :param objects: List of visible game objects with normalized positions [-1, 1]
-        :param my_area: Current area of the agent
+        :param threats: List of visible threats
+        :param prey: List of visible prey
+        :param foods: List of visible foods
+        :param viruses: List of visible viruses
+        :param my_pos: Current position of the agent
+        :param min_area: Min area of parts of this player
+        :param max_area: Max area of parts of this player
         :return: tuple of (move_x, move_y, split, eject)
         """
-        if my_area is not None:
-            self.my_area = my_area
+        self.my_area = max_area
 
-        move_x, move_y = 0.0, 0.0
+        target_pos = [my_pos[0], my_pos[1]]
         split, eject = 0.0, 0.0
 
-        if not objects:
-            self.last_action = (0.0, 0.0, 0.0, 0.0)
-            return self.last_action
-
-        # Classify nearby objects
-        foods = []
-        threats = []
-        prey = []
-        viruses = []
-
-        for obj in objects:
-            if obj.label == "food":
-                foods.append(obj)
-            elif obj.label == "virus":
-                viruses.append(obj)
-            elif obj.label == "player":
-                if self.my_area > 0:
-                    if obj.area > self.my_area * self.THREAT_SIZE_RATIO:
-                        threats.append(obj)
-                    elif obj.area < self.my_area * self.PREY_SIZE_RATIO:
-                        prey.append(obj)
-                else:
-                    threats.append(obj)
-
         # Rule 1: Flee from threats (highest priority)
+        running = False
         if threats:
-            closest_threat = min(threats, key=lambda o: geometry_utils.sqr_distance(my_pos, o.pos))
-            threat_dist = geometry_utils.sqr_distance(my_pos, closest_threat.pos)
-            if threat_dist > 0:
-                urgency = max(0.5, 1.0 - threat_dist)
-                move_x = -closest_threat.pos.x * urgency
-                move_y = -closest_threat.pos.y * urgency
+            closest_threat = min(threats, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+            threat_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_threat[0], closest_threat[1])
+            if threat_dist < self.SPLIT_DISTANCE_THRESHOLD * self.SPLIT_DISTANCE_THRESHOLD:
+                # Calculate direction away from threat
+                dx = my_pos[0] - closest_threat[0]
+                dy = my_pos[1] - closest_threat[1]
+                urgency = self.SPLIT_DISTANCE_THRESHOLD * self.SPLIT_DISTANCE_THRESHOLD - threat_dist
+                target_pos[0] = my_pos[0] + dx * urgency
+                target_pos[1] = my_pos[1] + dy * urgency
+                running = True
 
         # Rule 2: Chase prey
-        elif prey:
-            closest_prey = min(prey, key=lambda o: geometry_utils.sqr_distance(my_pos, o.pos))
-            prey_dist = geometry_utils.sqr_distance(my_pos, closest_prey.pos)
-            move_x = closest_prey.pos.x
-            move_y = closest_prey.pos.y
+        if not running:
+            if prey:
+                closest_prey = min(prey, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+                prey_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_prey[0], closest_prey[1])
+                target_pos[0] = closest_prey[0]
+                target_pos[1] = closest_prey[1]
 
-            # Split attack if close enough and can eat after split
-            if prey_dist < self.SPLIT_DISTANCE_THRESHOLD:
-                half_my_area = self.my_area / 2.0
-                if half_my_area > closest_prey.area * self.SPLIT_SIZE_RATIO:
-                    split = 1.0
-
-        # Rule 3: Eat food
-        elif foods:
-            best_food = max(foods, key=lambda o: o.count / (geometry_utils.sqr_distance(my_pos, o.pos) + 0.1))
-            move_x = best_food.pos.x
-            move_y = best_food.pos.y
+                # Split attack if close enough and can eat after split
+                threshold = self.SPLIT_DISTANCE_THRESHOLD + my_radius
+                if prey_dist < threshold * threshold:
+                    half_my_area = min_area * 0.5
+                    if half_my_area * self.PREY_SIZE_RATIO > closest_prey[2]:
+                        split = 1.0
+            # Rule 3: Eat food
+            elif foods:
+                closest_food = min(foods, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+                target_pos[0] = closest_food[0]
+                target_pos[1] = closest_food[1]
 
         # Virus avoidance (when large enough)
         if viruses and self.my_area > self.VIRUS_DANGER_SIZE:
             for virus in viruses:
-                virus_dist = geometry_utils.sqr_distance(my_pos, virus.pos)
-                if virus_dist < self.VIRUS_AVOID_DISTANCE:
-                    avoid_strength = (self.VIRUS_AVOID_DISTANCE - virus_dist) / self.VIRUS_AVOID_DISTANCE
-                    move_x -= virus.pos.x * avoid_strength * 0.5
-                    move_y -= virus.pos.y * avoid_strength * 0.5
+                virus_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], virus[0], virus[1])
+                avoid_dst_sqr = self.VIRUS_AVOID_DISTANCE * self.VIRUS_AVOID_DISTANCE
+                if virus_dist < avoid_dst_sqr:
+                    avoid_strength = (avoid_dst_sqr - virus_dist) / avoid_dst_sqr
+                    dx = virus[0] - my_pos[0]
+                    dy = virus[1] - my_pos[1]
+                    target_pos[0] -= dx * avoid_strength
+                    target_pos[1] -= dy * avoid_strength
 
-        self.last_action = (move_x, move_y, split, eject)
+        self.last_action = (target_pos, split, eject)
         return self.last_action
 
     def run_web_game(self, visualize: bool):
@@ -442,10 +431,10 @@ class ModelBasedReflexAgent(BaseAgent):
                         estimated_area = obj.area
                         break
 
-                move_x, move_y, split, eject = self.get_action(objects, estimated_area)
+                target_pos, split, eject = self.get_action(objects, estimated_area)
 
-                self.scraper.move(move_x * self.move_sensitivity,
-                                  move_y * self.move_sensitivity, 5)
+                self.scraper.move(target_pos[0],
+                                  target_pos[1], 5)
 
                 if split > 0:
                     self.scraper.press_space()

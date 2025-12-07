@@ -78,11 +78,12 @@ class Cell(Circle, Victim):
         return bounds[0][0] <= self.pos[0] <= bounds[1][0] and bounds[1][1] <= self.pos[1] <= bounds[0][1]
 
     @classmethod
-    def make_random(cls, bounds):
+    def make_random(cls, bounds, color=None):
         """Creates random cell."""
         pos = gu.random_pos(bounds)
         radius = random.choices(cls.SIZES, cls.SIZES_CUM)[0]
-        color = gu.random_safe_color()
+        if color is None:
+            color = gu.random_safe_color()
         return cls(pos, radius, color)
 
     def __repr__(self):
