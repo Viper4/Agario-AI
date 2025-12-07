@@ -36,7 +36,8 @@ class OCCamera:
         sy = int((self.y - pos[1]) * self.scale)
         return sx, sy
 
-    def get_inverse_scale(self, score):
+    @staticmethod
+    def get_inverse_scale(score):
         """
         Calculates the inverse of camera scale given score.
         :param score:

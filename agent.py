@@ -317,6 +317,15 @@ class RNNAgent(BaseAgent):
                     return fitness
             time.sleep(self.run_interval)
 
+    def copy(self):
+        """
+        Creates a copy of this agent
+        :return: copy of this agent
+        """
+        copy = RNNAgent(self.hyperparameters.copy(), self.fitness_weights, False, self.device)
+        copy.rnn.load_state_dict(self.rnn.state_dict())
+        return copy
+
 
 class ModelBasedReflexAgent(BaseAgent):
     """

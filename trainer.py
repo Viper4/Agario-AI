@@ -3,7 +3,6 @@ import torch
 import numpy as np
 import random
 import agario_simulation
-import json
 import pickle
 import sys
 from agent import RNNAgent, Hyperparameters, FitnessWeights
@@ -17,14 +16,14 @@ def run_simulation_worker(fps: int, simulation_duration: float, agent_snapshots:
     agents = []
     for agent_snapshot in agent_snapshots:
         # Reconstruct agent from snapshot
-        agent = RNNAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))  # CPU only for multiprocessing
+        agent = RNNAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))  # Overhead of moving to GPU is too high
         agent.rnn.load_state_dict(agent_snapshot)  # Load agent parameters from snapshot
         agents.append(agent)
-    sim = agario_simulation.AgarioSimulation(base_view_width=900, base_view_height=600,
+    sim = agario_simulation.AgarioSimulation(view_width=900, view_height=600,
                                              bounds=1500,
                                              food_count=600,
                                              virus_count=20)
-    return sim.run_RNN(agents, fps, simulation_duration, headless)
+    return sim.run_rnn(agents, fps, simulation_duration, headless)
 
 
 class GeneticTrainer:
@@ -176,7 +175,7 @@ class GeneticTrainer:
             # Save agent parameters to file
             with open("agent_snapshots.pkl", "wb") as f:
                 agent_snapshots = [agent.rnn.state_dict() for agent in self.population]
-                pickle.dump(agent_snapshots, f)
+                pickle.dump(agent_snapshots, f)  # Save agent parameters in order of fitness
 
             # Create new population
             new_population = []

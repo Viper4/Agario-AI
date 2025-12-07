@@ -32,7 +32,9 @@ Install requirements:
 
 ## Usage
 
-    usage: main.py
+    usage: trainer.py
+    usage: agario_simulation.py
+    usage: agario_singleplayer.py
 
 
 ## Screenshots
