@@ -20,8 +20,8 @@ def run_simulation_worker(fps: int, simulation_duration: float, agent_snapshots:
         agent.rnn.load_state_dict(agent_snapshot)  # Load agent parameters from snapshot
         rnn_agents.append(agent)
     sim = agario_simulation.AgarioSimulation(view_width=900, view_height=600,
-                                             bounds=1500,
-                                             food_count=600,
+                                             bounds=2000,
+                                             food_count=700,
                                              virus_count=20)
     return sim.run(rnn_agents, len(rnn_agents) // 5, fps, simulation_duration, headless)
 
@@ -75,6 +75,33 @@ class GeneticTrainer:
                              randomize_params=False, device=torch.device("cpu"))
 
             # Crossover from both parents
+
+            '''
+            # Two-point crossover
+            # Flatten all parameters into single vectors
+            p1 = torch.cat([p.data.view(-1) for p in parent1.rnn.parameters()])
+            p2 = torch.cat([p.data.view(-1) for p in parent2.rnn.parameters()])
+
+            num_params = p1.numel()
+
+            # Choose crossover points
+            start = random.randint(0, num_params - 2)
+            end = random.randint(start + 1, num_params - 1)
+
+            # Perform crossover
+            child_vector = torch.empty_like(p1)
+            child_vector[:start] = p1[:start]
+            child_vector[start:end] = p2[start:end]
+            child_vector[end:] = p1[end:]
+
+            # Load child vector back into child model parameters
+            idx = 0
+            for param_child in child.rnn.parameters():
+                num = param_child.data.numel()
+                param_child.data.copy_(child_vector[idx:idx + num].view(param_child.data.shape))
+                idx += num'''
+
+            # Random crossover 50% chance for either parent at every parameter
             for (param1, param2, param_child) in zip(
                         parent1.rnn.parameters(),
                         parent2.rnn.parameters(),
@@ -86,7 +113,7 @@ class GeneticTrainer:
                 )
 
             child.mutate()
-            child.reduce_sigma(0.95)  # Reduce mutation strength
+            child.update_sigma(factor=0.95, base_param_mutations=self.hyperparameters.param_mutations)
             children.append(child)
         return children
 
@@ -109,7 +136,7 @@ class GeneticTrainer:
             agent_snapshots = [agent.rnn.state_dict() for agent in self.population]
             pickled_data = pickle.dumps((self.hyperparameters, self.fitness_weights))
 
-            pool = Pool(processes=max(num_simulations, 8))
+            pool = Pool(processes=min(num_simulations, os.cpu_count() - 4))
             jobs = []
             try:
                 for i in range(num_simulations):
@@ -137,40 +164,7 @@ class GeneticTrainer:
                 self.population[i].avg_fitness = sum(self.population[i].fitnesses) / num_simulations
                 total_final_fitness += self.population[i].avg_fitness
 
-            # Print generation statistics
             self.population.sort(key=lambda x: x.avg_fitness, reverse=True)
-
-            num_elites = self.population_size // 20
-            num_parents = self.population_size // 2 - num_elites
-            child_counts = []
-            for i in range(0, self.population_size, 2):
-                if i+1 < num_parents:
-                    # Linear allocation based on rank
-                    a = 4
-                    b = a / num_parents
-                    num_children = round(a-b*i + a-b*(i+1))
-                    child_counts.append(num_children)
-                    child_counts.append(num_children)
-                else:
-                    child_counts.append(0)
-                    child_counts.append(0)
-
-            print(f"Generation {generation} complete")
-            print(f"Mean fitness: {total_final_fitness / self.population_size:.2f}")
-            print(f"Fitness standard deviation: {np.std([x.avg_fitness for x in self.population]).item():.4f}")
-            print(f"Mutation strengths: {self.population[0].hyperparameters.param_mutations}")
-            individual_string = ""
-            for i in range(num_simulations):
-                individual_string += "\t|\tSim " + str(i+1) + " Fitness"
-            label_string = f"Rank\t|\tAvg Fitness{individual_string}\t|\tChildren"
-            print(label_string)
-            print("-" * (len(label_string)+50))
-            for i in range(self.population_size):
-                fitnesses_string = ""
-                for j in range(num_simulations):
-                    fitnesses_string += f"\t|\t{repr(self.population[i].fitnesses[j] + 0.0000000001)[:10]}"
-                print(f"{i}\t|\t{repr(self.population[i].avg_fitness + 0.0000000001)[:10]}{fitnesses_string}\t|\t{child_counts[i]}")
-            print("-" * (len(label_string)+50))
 
             # Save agent parameters to file
             with open("agent_snapshots.pkl", "wb") as f:
@@ -180,10 +174,15 @@ class GeneticTrainer:
             # Create new population
             new_population = []
 
+            num_elites = self.population_size // 10
+            num_parents = self.population_size // 2 - num_elites
+            child_counts = [0] * self.population_size
+
             # Elitism
             for i in range(num_elites):
                 new_population.append(self.population[i])
 
+            # Pair mating
             for i in range(0, num_parents, 2):
                 if i+1 >= self.population_size:
                     break
@@ -195,7 +194,10 @@ class GeneticTrainer:
                 a = 4
                 b = a / num_parents
                 children = self.reproduce(parent1, parent2, round(a-b*i + a-b*(i+1)))
+                child_counts[i] = len(children)
+                child_counts[i + 1] = len(children)
                 new_population.extend(children)
+
             diff = self.population_size - len(new_population)
             if diff < 0:  # Too many children
                 # Cutoff the bottom
@@ -203,11 +205,32 @@ class GeneticTrainer:
             elif diff > 0:  # Not enough children
                 # Reproduce random parents from top half
                 for i in range(diff):
-                    # Small chance to pick the same parent twice, so cloning is sometimes possible
-                    parent1 = random.choice(self.population[:self.population_size//2])
-                    parent2 = random.choice(self.population[:self.population_size//2])
-                    children = self.reproduce(parent1, parent2, 1)
+                    parent1_index = random.randint(0, self.population_size // 2 - 1)
+                    parent2_index = random.randint(0, self.population_size // 2 - 1)
+                    while parent1_index == parent2_index:  # Small chance to pick the same parent twice
+                        parent2_index = random.randint(0, self.population_size // 2 - 1)
+                    children = self.reproduce(self.population[parent1_index], self.population[parent2_index], 1)
+                    child_counts[parent1_index] += 1
+                    child_counts[parent2_index] += 1
                     new_population.extend(children)
+
+            # Print generation statistics
+            print(f"Generation {generation} complete")
+            print(f"Mean fitness: {total_final_fitness / self.population_size:.2f}")
+            print(f"Fitness standard deviation: {np.std([x.avg_fitness for x in self.population]).item():.4f}")
+            print(f"Mutation strengths: {self.population[0].hyperparameters.param_mutations}")
+            individual_string = ""
+            for i in range(num_simulations):
+                individual_string += "\t| Sim " + str(i+1) + " Fitness"
+            label_string = f"Rank\t| Avg Fitness{individual_string}\t| Children"
+            print(label_string)
+            print("-" * (len(label_string)+50))
+            for i in range(self.population_size):
+                fitnesses_string = ""
+                for j in range(num_simulations):
+                    fitnesses_string += f"\t| {repr(self.population[i].fitnesses[j] + 0.0000000001)[:10]}"
+                print(f"{i}\t| {repr(self.population[i].avg_fitness + 0.0000000001)[:10]}{fitnesses_string}\t| {child_counts[i]}")
+            print("-" * (len(label_string)+50))
 
             self.population = new_population
             generation += 1
@@ -216,6 +239,10 @@ class GeneticTrainer:
 
 if __name__ == "__main__":
     # Max number of objects on screen at a time reaches ~50 so define fixed input of 32 objects with 8 nodes per object
+    grid_weight = 9
+    grid_height = 6
+    nodes_per_cell = 4
+    num_inputs = grid_weight * grid_height * nodes_per_cell
     hyperparameters = Hyperparameters(hidden_layers=[64, 16],
                                       output_size=4,
                                       run_interval=0.1,
@@ -224,9 +251,9 @@ if __name__ == "__main__":
                                       grid_width=9,
                                       grid_height=6,
                                       nodes_per_cell=4)
-    fitness_weights = FitnessWeights(food=0.5, time_alive=100.0, cells_eaten=50.0, score=0.75, death=500.0)
+    fitness_weights = FitnessWeights(food=0.1, time_alive=100.0, cells_eaten=10.0, score=0.9, death=0.0)
 
     trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
                              hyperparameters=hyperparameters,
                              fitness_weights=fitness_weights)
-    trainer.train(True, 5)
+    trainer.train(load_from_file=True, num_simulations=6)

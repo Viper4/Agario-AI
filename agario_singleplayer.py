@@ -1,8 +1,6 @@
 import argparse
 import pygame
 import time
-import threading
-
 from game.opencv_view import OCView
 from game.view import View
 from game.model import Model

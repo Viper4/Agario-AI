@@ -290,4 +290,4 @@ if __name__ == '__main__':
     screen = pygame.display.set_mode((900, 600))
 
     v = View(screen, m, p, debug=True)
-    v.start_human_game()
+    v.start_human_game(600, 20)
