@@ -28,9 +28,9 @@ class AgarioSimulation:
         :param agent: ModelBasedReflexAgent to make actions with during simulation
         :param player: Player to make actions for
         :param model: Model to use for simulation
+        :param current_tick: Current simulation frame/tick for memory buffer decay
         :return: The agent's (target_pos, split, eject)
         """
-        # Expand view bounds based on player's score
         center_pos = player.center()
         min_area = 10000000
         max_area = 0.0
@@ -47,7 +47,6 @@ class AgarioSimulation:
         scaled_height = view_height * inv_scale
         half_view_width = scaled_width * 0.5
         half_view_height = scaled_height * 0.5
-        # Bounds is top left corner and bottom right corner
         view_bounds = ((center_pos[0] - half_view_width, center_pos[1] + half_view_height),
                        (center_pos[0] + half_view_width, center_pos[1] - half_view_height))
 
@@ -55,7 +54,7 @@ class AgarioSimulation:
         prey = []
         foods = []
         viruses = []
-        # Convert objects in view to GameObjects to pass to sra
+        # Prepare objects in view to be passed to SRA
         for chunk in model.get_chunks(view_bounds):
             for cell in chunk.cells:
                 if cell.within_bounds(view_bounds):
@@ -73,7 +72,7 @@ class AgarioSimulation:
                     elif player_area < max_area * agent.PREY_SIZE_RATIO:
                         prey.append((playercell.pos[0], playercell.pos[1], player_area))
 
-        return agent.get_action(threats, prey, foods, viruses, center_pos, min_area, max_area, max_radius)
+        return agent.get_action(threats, prey, foods, viruses, center_pos, min_area, max_area, max_radius, current_tick)
 
     @staticmethod
     def rnn_tick(view_width: int, view_height: int, agent: RNNAgent, player: Player, model: Model):
@@ -181,7 +180,7 @@ class AgarioSimulation:
         :param headless: Whether to draw the game's visuals.
         :return: List of fitness values for each RNN agent
         """
-        num_frames = int(simulation_duration * base_fps)  # Number of iterations to run the simulation for
+        num_frames = int(simulation_duration * base_fps)
 
         bounds = [self.bounds, self.bounds]
 
@@ -189,7 +188,6 @@ class AgarioSimulation:
         prev_target_pos = []
 
         for i in range(len(agents)):
-            # RNN agent color is green
             ai_player = Player.make_random(f"Agent {i}", bounds, color=(0, 255, 0))
             rnn_players.append(ai_player)
             prev_target_pos.append(rnn_players[i].center())
@@ -213,7 +211,6 @@ class AgarioSimulation:
         start_time = time.time()
         last_agent_run_frame = -100
         for frame in tqdm(range(num_frames), desc="Running simulation", unit="frames"):
-            # Maintain virus and food counts
             if model.num_viruses < self.virus_count:
                 model.spawn_viruses(self.virus_count - model.num_viruses)
             if model.num_cells < self.food_count:
@@ -222,7 +219,6 @@ class AgarioSimulation:
             run_agent = frame - last_agent_run_frame >= agents[0].run_interval * base_fps
 
             if not run_agent:
-                # Maintain RNN agent's previous target position
                 for i in range(len(rnn_players)):
                     if rnn_players[i].alive:
                         rnn_players[i].ticks_alive += 1
@@ -235,7 +231,6 @@ class AgarioSimulation:
 
                     target_pos, split, eject = AgarioSimulation.sra_tick(self.view_width, self.view_height, sras[i], sra_players[i], model)
 
-                    # Execute actions
                     if split > 0:
                         model.split(sra_players[i], target_pos)
                     if eject > 0:
@@ -243,7 +238,6 @@ class AgarioSimulation:
                     model.update_velocity(sra_players[i], target_pos)
                     prev_target_pos[i] = target_pos
 
-                # Run RNN agent actions
                 rnn_agents_alive = 0
                 for i in range(len(agents)):
                     if not rnn_players[i].alive:
@@ -254,7 +248,6 @@ class AgarioSimulation:
 
                     target_pos, split, eject = self.rnn_tick(self.view_width, self.view_height, agents[i], rnn_players[i], model)
 
-                    # Execute actions
                     if split > 0:
                         model.split(rnn_players[i], target_pos)
                     if eject > 0:
@@ -270,7 +263,6 @@ class AgarioSimulation:
             model.update()
             if not headless:
                 target_score = view.player.score()
-                # Expand view while maintaining aspect ratio
                 inv_scale = OCCamera.get_inverse_scale(target_score)
                 view.camera.scale = 1.0 / inv_scale
                 view.redraw(spectate_mode=True)
@@ -301,10 +293,78 @@ class AgarioSimulation:
         :param base_fps: Frames per second for a game at normal speed.
         :param simulation_duration: How long the simulation runs in seconds. Doesn't mean termination will occur at this time.
         :param headless: Whether to draw the game's visuals.
-        :return: List of fitness values for each agent
-        :return:
+        :return: Fitness value for the agent
         """
-        pass
+        num_frames = int(simulation_duration * base_fps)
+        
+        bounds = [self.bounds, self.bounds]
+        
+        mbra_player = Player.make_random("MBRA Agent", bounds, color=(255, 0, 0))
+        prev_target_pos = mbra_player.center()
+        
+        model = Model([mbra_player], bounds=bounds, chunk_size=self.bounds // 10)
+        model.spawn_cells(self.food_count)
+        model.spawn_viruses(self.virus_count)
+        print(f"MBRA Simulation model initialized with {model.chunk_count_x}x{model.chunk_count_y}={model.chunk_count_x*model.chunk_count_y} chunks.")
+        
+        view = None
+        if not headless:
+            view = OCView(self.view_width, self.view_height, model, mbra_player, debug=False)
+        
+        start_time = time.time()
+        last_agent_run_frame = -100
+        
+        for frame in tqdm(range(num_frames), desc="Running MBRA simulation", unit="frames"):
+            if model.num_viruses < self.virus_count:
+                model.spawn_viruses(self.virus_count - model.num_viruses)
+            if model.num_cells < self.food_count:
+                model.spawn_cells(self.food_count - model.num_cells)
+            
+            if not mbra_player.alive:
+                break
+            
+            run_agent = frame - last_agent_run_frame >= agent.run_interval * base_fps
+            
+            if mbra_player.alive:
+                mbra_player.ticks_alive += 1
+                if run_agent:
+                    target_pos, split, eject = AgarioSimulation.mbra_tick(
+                        self.view_width, self.view_height, agent, mbra_player, model, frame
+                    )
+                    
+                    if split > 0:
+                        model.split(mbra_player, target_pos)
+                    if eject > 0:
+                        model.shoot(mbra_player, target_pos)
+                    prev_target_pos = target_pos
+                    last_agent_run_frame = frame
+                
+                model.update_velocity(mbra_player, prev_target_pos)
+            
+            model.update()
+            
+            if not headless and view is not None:
+                target_score = mbra_player.score()
+                inv_scale = OCCamera.get_inverse_scale(target_score)
+                view.camera.scale = 1.0 / inv_scale
+                view.redraw(spectate_mode=True)
+        
+        fitness = agent.calculate_fitness(
+            mbra_player.num_food_eaten,
+            mbra_player.ticks_alive / num_frames,
+            mbra_player.num_players_eaten,
+            mbra_player.score(),
+            int(not mbra_player.alive)
+        )
+        
+        print(f"MBRA Simulation complete after {time.time() - start_time:.2f} seconds")
+        print(f"Agent alive: {mbra_player.alive}, Fitness: {fitness:.2f}")
+        print(f"Stats - Food eaten: {mbra_player.num_food_eaten}, "
+              f"Players eaten: {mbra_player.num_players_eaten}, "
+              f"Score: {mbra_player.score():.2f}, "
+              f"Time alive: {mbra_player.ticks_alive / num_frames:.2%}")
+        
+        return fitness
 
 
 def main():
@@ -360,13 +420,12 @@ def main():
 
     if args.opencv:
         view = OCView(args.width, args.height, model, human_player)
+        frame = 0
 
         while True:
-            # Maintain virus count
             if model.num_viruses < args.viruses:
                 model.spawn_viruses(args.viruses - model.num_viruses)
 
-            # Maintain food count
             if model.num_cells < args.food:
                 model.spawn_cells(args.food - model.num_cells)
 
@@ -377,7 +436,6 @@ def main():
 
                 target_pos, split, eject = AgarioSimulation.sra_tick(args.width, args.height, sra_agents[i], players[i], model)
 
-                # Execute actions
                 if split > 0:
                     model.split(players[i], target_pos)
                 if eject > 0:
@@ -398,9 +456,9 @@ def main():
 
             view.redraw(spectate_mode=False)
             model.update()
+            frame += 1
             time.sleep(0.01)
     else:
-        # Start view loop (handles input: mouse to move, W to shoot, SPACE to split)
         pygame.init()
         screen = pygame.display.set_mode((args.width, args.height))
         pygame.display.set_caption('Agar.io Offline')
