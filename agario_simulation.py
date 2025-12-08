@@ -285,7 +285,7 @@ class AgarioSimulation:
             fitnesses.append(agents[i].calculate_fitness(rnn_players[i].num_food_eaten,
                                                          rnn_players[i].ticks_alive / num_frames,
                                                          rnn_players[i].num_players_eaten,
-                                                         rnn_players[i].score(),
+                                                         rnn_players[i].score() + rnn_players[i].highest_score,
                                                          int(not rnn_players[i].alive)))
         for i in range(len(mbras)):
             if mbra_players[i].alive:

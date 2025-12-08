@@ -210,6 +210,7 @@ class RNNAgent(BaseAgent):
 
                 noise = torch.randn_like(param) * sigma  # Gaussian noise
                 param.data.add_(noise)
+        self.epsilon = 0.005
 
     def forward(self, x):
         """
@@ -221,13 +222,18 @@ class RNNAgent(BaseAgent):
         self.hidden = h
         return output
 
-    def reduce_sigma(self, factor: float):
+    def update_sigma(self, factor: float, base_param_mutations: dict):
         """
         Reduce the standard deviation of mutation as the agent becomes more fit.
+        Resets mutation standard deviation to original if it goes below epsilon.
         :param factor: factor to reduce standard deviation by
+        :param base_param_mutations: the original mutation standard deviations
         """
         for mutation in self.hyperparameters.param_mutations:
-            self.hyperparameters.param_mutations[mutation] *= factor
+            if self.hyperparameters.param_mutations[mutation] < self.epsilon:
+                self.hyperparameters.param_mutations[mutation] = base_param_mutations[mutation]
+            else:
+                self.hyperparameters.param_mutations[mutation] *= factor
 
     def mutate(self):
         """
