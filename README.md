@@ -36,6 +36,97 @@ Install requirements:
     usage: agario_simulation.py
     usage: agario_singleplayer.py
 
+### Training RNN Agents
+    python trainer.py
+
+### Running Simulations
+    # Run simulation with RNN and MBRA agents
+    python agario_simulation.py
+    
+    # Run standalone MBRA simulation (for testing)
+    python test_mbra.py -t simulation
+    
+    # Run memory buffer tests
+    python test_mbra.py -t memory
+
+### Single Player Game
+    python agario_singleplayer.py
+
+## Model-Based Reflex Agent with Memory Buffer
+
+### Overview
+The ModelBasedReflexAgent (MBRA) has been enhanced with a memory buffer system that implements priority-based decay for previously observed game objects. This allows the agent to make decisions based on both currently visible objects and remembered objects from recent observations.
+
+### Memory Buffer Architecture
+
+**MemoryItem Class:**
+- Stores object information: type (threat/prey/food/virus), position, priority, timestamp
+- Tracks object properties: area, radius, etc.
+
+**MemoryBuffer Class:**
+- Manages memory items grouped by type (threats, prey, foods, viruses)
+- Supports add, update, decay, and cleanup operations
+- Implements maximum capacity limits to prevent unbounded growth
+
+### Priority Decay Mechanism
+
+**Decay Formula:**
+The priority of each memory item decays exponentially over time:
+```
+p_i(t) = p_i(0) * decay_factor ^ (t - t_0)
+```
+
+**Initial Priority Values:**
+- Threats: 1.0 (highest priority)
+- Prey: 0.8
+- Foods: 0.6
+- Viruses: 0.7
+
+**Update Rules:**
+- If object is currently visible: reset priority to initial value
+- If object is not visible: apply exponential decay
+- Remove objects when priority falls below threshold (0.1)
+
+**Configuration Parameters:**
+- `decay_factor`: 0.9-0.95 (decay rate per tick)
+- `priority_threshold`: 0.1 (removal threshold)
+- `max_memory_size`: 100 (max objects per type)
+
+### Decision Integration
+
+The agent combines current observations with memory buffer items:
+1. **Current visible objects**: assigned initial priority values
+2. **Memory buffer objects**: use decayed priority values
+3. **Merging strategy**: 
+   - If same object exists in both, use higher priority
+   - Sort by priority, prioritize high-priority objects
+   - Apply distance weighting for memory buffer objects
+
+### Implementation Status
+
+- Memory buffer data structures (MemoryItem, MemoryBuffer)
+- Priority decay mechanism
+- Integration with ModelBasedReflexAgent.get_action()
+- run_mbra() method in agario_simulation.py for standalone MBRA testing
+- Test script (test_mbra.py) for memory buffer and simulation testing
+
+### Testing
+
+Use the test script to verify memory buffer functionality and run MBRA simulations:
+
+```bash
+# Run all tests
+python test_mbra.py
+
+# Run only memory buffer tests
+python test_mbra.py -t memory
+
+# Run only simulation test
+python test_mbra.py -t simulation
+
+# Run simulation with custom parameters
+python test_mbra.py -t simulation -d 120 -f 60 --headless
+```
 
 ## Screenshots
 
