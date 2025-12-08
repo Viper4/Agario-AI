@@ -1,5 +1,4 @@
 import time
-import itertools
 from dataclasses import dataclass, field
 
 from .entities import Cell, Virus, PlayerCell

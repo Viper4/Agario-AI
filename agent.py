@@ -334,9 +334,9 @@ class RNNAgent(BaseAgent):
         return copy
 
 
-class ModelBasedReflexAgent(BaseAgent):
+class SimpleReflexAgent(BaseAgent):
     """
-    Model-based reflex agent using rule-based decision making instead of neural networks.
+    Simple reflex agent using rule-based decision-making instead of neural networks.
     """
 
     VIRUS_DANGER_SIZE = 300.0
@@ -448,7 +448,7 @@ class ModelBasedReflexAgent(BaseAgent):
                     self.scraper.press_w()
             else:
                 if self.alive:
-                    print("ModelBasedReflexAgent died. Calculating fitness...")
+                    print("SimpleReflexAgent died. Calculating fitness...")
                     stats = self.scraper.get_stats(wait=True)
 
                     if stats is None:

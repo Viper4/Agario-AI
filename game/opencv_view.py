@@ -152,7 +152,7 @@ class OCView:
     def poll_spectate_keys(self, playercells):
         """
         Check for key events in spectate mode.
-        :param players: List of playercells to switch between
+        :param playercells: List of playercells to switch between
         :return:
         """
         # Poll key press (non-blocking)
