@@ -8,7 +8,7 @@ from game.opencv_view import OCView, OCCamera
 from game.view import View
 from game.model import Model
 from game.entities import Player
-from agent import RNNAgent, SimpleReflexAgent, Hyperparameters, FitnessWeights
+from agent import RNNAgent, SimpleReflexAgent, ModelBasedReflexAgent, Hyperparameters, FitnessWeights
 
 
 class AgarioSimulation:
@@ -28,7 +28,6 @@ class AgarioSimulation:
         :param agent: ModelBasedReflexAgent to make actions with during simulation
         :param player: Player to make actions for
         :param model: Model to use for simulation
-        :param current_tick: Current simulation frame/tick for memory buffer decay
         :return: The agent's (target_pos, split, eject)
         """
         center_pos = player.center()
@@ -72,7 +71,62 @@ class AgarioSimulation:
                     elif player_area < max_area * agent.PREY_SIZE_RATIO:
                         prey.append((playercell.pos[0], playercell.pos[1], player_area))
 
-        return agent.get_action(threats, prey, foods, viruses, center_pos, min_area, max_area, max_radius, current_tick)
+        return agent.get_action(threats, prey, foods, viruses, center_pos, min_area, max_area, max_radius)
+
+    @staticmethod
+    def mbra_tick(view_width: int, view_height: int, agent: ModelBasedReflexAgent, player: Player, model: Model, simulation_tick: int):
+        """
+        Runs a single tick of the simulation for the given MBRA agent.
+        :param view_width: Width of the view
+        :param view_height: Height of the view
+        :param agent: ModelBasedReflexAgent to make actions with during simulation
+        :param player: Player to make actions for
+        :param model: Model to use for simulation
+        :param simulation_tick: Current simulation tick for memory buffer decay
+        :return: The agent's (target_pos, split, eject)
+        """
+        center_pos = player.center()
+        min_area = 10000000
+        max_area = 0.0
+        max_radius = 0.0
+        for part in player.parts:
+            area = part.area()
+            min_area = min(min_area, area)
+            max_area = max(max_area, area)
+            max_radius = max(max_radius, part.radius)
+        score = player.score()
+        inv_scale = OCCamera.get_inverse_scale(score)
+
+        scaled_width = view_width * inv_scale
+        scaled_height = view_height * inv_scale
+        half_view_width = scaled_width * 0.5
+        half_view_height = scaled_height * 0.5
+        view_bounds = ((center_pos[0] - half_view_width, center_pos[1] + half_view_height),
+                       (center_pos[0] + half_view_width, center_pos[1] - half_view_height))
+
+        threats = []
+        prey = []
+        foods = []
+        viruses = []
+        # Prepare objects in view to be passed to SRA
+        for chunk in model.get_chunks(view_bounds):
+            for cell in chunk.cells:
+                if cell.within_bounds(view_bounds):
+                    foods.append((cell.pos[0], cell.pos[1]))
+            for virus in chunk.viruses:
+                if virus.within_bounds(view_bounds):
+                    viruses.append((virus.pos[0], virus.pos[1]))
+            for playercell in chunk.playercells:
+                if playercell.parent is player:
+                    continue
+                if playercell.within_bounds(view_bounds):
+                    player_area = playercell.area()
+                    if player_area > max_area * agent.THREAT_SIZE_RATIO:
+                        threats.append((playercell.pos[0], playercell.pos[1]))
+                    elif player_area < max_area * agent.PREY_SIZE_RATIO:
+                        prey.append((playercell.pos[0], playercell.pos[1], player_area))
+
+        return agent.get_action(threats, prey, foods, viruses, center_pos, min_area, max_area, max_radius, simulation_tick)
 
     @staticmethod
     def rnn_tick(view_width: int, view_height: int, agent: RNNAgent, player: Player, model: Model):
@@ -285,7 +339,7 @@ class AgarioSimulation:
         print(f"Simulation complete after {time.time() - start_time:.2f} seconds with {rnn_agents_alive} RNN agents alive and {sras_alive} sra agents alive")
         return fitnesses
     
-    def run_sra(self, agent: SimpleReflexAgent, base_fps: int, simulation_duration: float, headless: bool):
+    def run_mbra(self, agent: ModelBasedReflexAgent, base_fps: int, simulation_duration: float, headless: bool):
         """
         Run a simulation with only SimpleReflexAgent.
         Stops when the duration is reached or when only 1 agent is alive.
@@ -374,7 +428,8 @@ def main():
     parser.add_argument('-b', '--bounds', dest='bounds', type=int, default=1500, help='half-size of world bounds (world is [-b,b] x [-b,b])')
     parser.add_argument('-f', '--food', dest='food', type=int, default=700, help='initial food cell count')
     parser.add_argument('-v', '--viruses', dest='viruses', type=int, default=20, help='initial virus count')
-    parser.add_argument('-mbr', '--sras', dest='sras', type=int, default=3, help='number of SRA agents')
+    parser.add_argument('-sr', '--sras', dest='sras', type=int, default=0, help='number of SRA agents')
+    parser.add_argument('-mbr', '--mbras', dest='mbras', type=int, default=20, help='number of MBRA agents')
     parser.add_argument('-rnn', '--rnns', dest='rnns', type=int, default=0, help='number of RNN agents')
     parser.add_argument('-n', '--nick', dest='nick', type=str, default='Player', help='your nickname')
     parser.add_argument('-oc', '--opencv', dest='opencv', type=bool, default=True, help='Whether to use OpenCV view')
@@ -401,19 +456,26 @@ def main():
 
     # Create model and players
     human_player = Player.make_random(args.nick, bounds)
-    players = []
+    sra_players = []
     sra_agents = []
+    mbra_players = []
+    mbra_agents = []
+    rnn_players = []
     rnn_agents = []
     for i in range(args.sras):
         sra_agents.append(SimpleReflexAgent(0.1, fitness_weights, 50.0))
         sra_player = Player.make_random(f"SRA {i}", bounds)
-        players.append(sra_player)
+        sra_players.append(sra_player)
+    for i in range(args.mbras):
+        mbra_agents.append(ModelBasedReflexAgent(0.1, fitness_weights, 50.0))
+        mbra_player = Player.make_random(f"SRA {i}", bounds)
+        mbra_players.append(mbra_player)
     for i in range(args.rnns):
         rnn_agents.append(base_rnn.copy())
         rnn_player = Player.make_random(f"RNN {i}", bounds)
-        players.append(rnn_player)
-    players.append(human_player)
+        rnn_players.append(rnn_player)
 
+    players = [human_player] + sra_players + mbra_players + rnn_players
     model = Model(players, bounds=bounds, chunk_size=args.bounds // 10)
     model.spawn_cells(args.food)
     model.spawn_viruses(args.viruses)
@@ -429,32 +491,45 @@ def main():
             if model.num_cells < args.food:
                 model.spawn_cells(args.food - model.num_cells)
 
-            # Run sra agents
-            for i in range(len(sra_agents)):
-                if not players[i].alive:
+            # Run SRA agents
+            for i in range(len(sra_players)):
+                if not sra_players[i].alive:
                     continue
 
-                target_pos, split, eject = AgarioSimulation.sra_tick(args.width, args.height, sra_agents[i], players[i], model)
+                target_pos, split, eject = AgarioSimulation.sra_tick(args.width, args.height, sra_agents[i], sra_players[i], model)
 
                 if split > 0:
-                    model.split(players[i], target_pos)
+                    model.split(sra_players[i], target_pos)
                 if eject > 0:
-                    model.shoot(players[i], target_pos)
-                model.update_velocity(players[i], target_pos)
+                    model.shoot(sra_players[i], target_pos)
+                model.update_velocity(sra_players[i], target_pos)
+
+            # Run MBRA agents
+            for i in range(len(mbra_players)):
+                if not mbra_players[i].alive:
+                    continue
+
+                target_pos, split, eject = AgarioSimulation.mbra_tick(args.width, args.height, mbra_agents[i], mbra_players[i], model, frame)
+
+                if split > 0:
+                    model.split(mbra_players[i], target_pos)
+                if eject > 0:
+                    model.shoot(mbra_players[i], target_pos)
+                model.update_velocity(mbra_players[i], target_pos)
 
             # Run RNN agents
-            for i in range(len(sra_agents), len(players) - 1):  # Don't include human player
-                if not players[i].alive:
+            for i in range(len(rnn_players)):
+                if not rnn_players[i].alive:
                     continue
-                players[i].ticks_alive += 1
-                target_pos, split, eject = AgarioSimulation.rnn_tick(args.width, args.height, rnn_agents[i], players[i], model)
+                rnn_players[i].ticks_alive += 1
+                target_pos, split, eject = AgarioSimulation.rnn_tick(args.width, args.height, rnn_agents[i], rnn_players[i], model)
                 if split > 0:
-                    model.split(players[i], target_pos)
+                    model.split(rnn_players[i], target_pos)
                 if eject > 0:
-                    model.shoot(players[i], target_pos)
-                model.update_velocity(players[i], target_pos)
+                    model.shoot(rnn_players[i], target_pos)
+                model.update_velocity(rnn_players[i], target_pos)
 
-            view.redraw(spectate_mode=False)
+            view.redraw(spectate_mode=True)
             model.update()
             frame += 1
             time.sleep(0.01)

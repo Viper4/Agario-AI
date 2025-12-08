@@ -540,7 +540,152 @@ class MemoryBuffer:
         dy = pos1[1] - pos2[1]
         return (dx * dx + dy * dy) < (threshold * threshold)
 
-      
+
+class ModelBasedReflexAgent(BaseAgent):
+    """
+    Model-based reflex agent using rule-based decision making instead of neural networks.
+    """
+
+    VIRUS_DANGER_SIZE = 300.0
+    THREAT_SIZE_RATIO = 1.1
+    PREY_SIZE_RATIO = 0.83
+    SPLIT_DISTANCE_THRESHOLD = 350.0
+    VIRUS_AVOID_DISTANCE = 100.0
+
+    def __init__(self, run_interval: float, fitness_weights: FitnessWeights, move_sensitivity: float = 50.0,
+                 decay_factor: float = 0.92, priority_threshold: float = 0.1,
+                 max_memory_size: int = 100, distance_weight_factor: float = 500.0):
+        super().__init__(run_interval, fitness_weights)
+        self.move_sensitivity = move_sensitivity
+        self.my_area = 0.0
+        self.last_action = (0.0, 0.0, 0.0, 0.0)
+        self.memory_buffer = MemoryBuffer(decay_factor=decay_factor,
+                                          priority_threshold=priority_threshold,
+                                          max_size_per_type=max_memory_size,
+                                          distance_weight_factor=distance_weight_factor)
+        self.current_tick = 0
+
+    def get_action(self, threats: list, prey: list, foods: list, viruses: list, my_pos: tuple[float, float],
+                   min_area: float, max_area: float, my_radius: float, current_tick: int = None):
+        """
+        Rule-based decision logic with memory buffer integration.
+        :param threats: List of visible threats
+        :param prey: List of visible prey
+        :param foods: List of visible foods
+        :param viruses: List of visible viruses
+        :param my_pos: Current position of the agent
+        :param min_area: Min area of parts of this player
+        :param max_area: Max area of parts of this player
+        :param my_radius: Maximum radius of player parts
+        :param current_tick: Current simulation tick (optional, uses internal counter if None)
+        :return: tuple of (target_pos, split, eject)
+        """
+        self.my_area = max_area
+        self.current_tick = current_tick if current_tick is not None else self.current_tick + 1
+
+        self.memory_buffer.update_with_visible_objects(threats, prey, foods, viruses, self.current_tick)
+        self.memory_buffer.decay_all(self.current_tick)
+        merged_threats, merged_prey, merged_foods, merged_viruses = self.memory_buffer.get_merged_objects(my_pos, threats, prey, foods, viruses)
+
+        target_pos = [my_pos[0], my_pos[1]]
+        split, eject = 0.0, 0.0
+
+        split_threshold_sqr = self.SPLIT_DISTANCE_THRESHOLD * self.SPLIT_DISTANCE_THRESHOLD
+        running = False
+
+        if merged_threats:
+            closest_threat = min(merged_threats,
+                                 key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+            threat_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_threat[0], closest_threat[1])
+            if threat_dist < split_threshold_sqr:
+                dx, dy = my_pos[0] - closest_threat[0], my_pos[1] - closest_threat[1]
+                urgency = split_threshold_sqr - threat_dist
+                target_pos[0] = my_pos[0] + dx * urgency
+                target_pos[1] = my_pos[1] + dy * urgency
+                running = True
+
+        if not running:
+            if merged_prey:
+                closest_prey = min(merged_prey,
+                                   key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+                prey_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_prey[0], closest_prey[1])
+                target_pos[0], target_pos[1] = closest_prey[0], closest_prey[1]
+
+                attack_threshold = (self.SPLIT_DISTANCE_THRESHOLD + my_radius) ** 2
+                if prey_dist < attack_threshold and len(closest_prey) >= 3:
+                    if min_area * 0.5 * self.PREY_SIZE_RATIO > closest_prey[2]:
+                        split = 1.0
+            elif merged_foods:
+                closest_food = min(merged_foods,
+                                   key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+                target_pos[0], target_pos[1] = closest_food[0], closest_food[1]
+
+        if merged_viruses and self.my_area > self.VIRUS_DANGER_SIZE:
+            avoid_dst_sqr = self.VIRUS_AVOID_DISTANCE * self.VIRUS_AVOID_DISTANCE
+            for virus in merged_viruses:
+                virus_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], virus[0], virus[1])
+                if virus_dist < avoid_dst_sqr:
+                    avoid_strength = (avoid_dst_sqr - virus_dist) / avoid_dst_sqr
+                    dx = virus[0] - my_pos[0]
+                    dy = virus[1] - my_pos[1]
+                    target_pos[0] -= dx * avoid_strength
+                    target_pos[1] -= dy * avoid_strength
+
+        self.last_action = (target_pos, split, eject)
+        return self.last_action
+
+    def run_web_game(self, visualize: bool):
+        """
+        Run the agent on the real agar.io website using web scraper.
+        :param visualize: Whether to show visualization window
+        :return: Final fitness score or None if stats retrieval fails
+        """
+        self.start_web_game()
+
+        while self.program_running:
+            if self.scraper.in_game():
+                self.alive = True
+                objects = self.get_web_game_data(visualize=visualize)
+
+                estimated_area = 400.0
+                for obj in objects:
+                    if obj.label == "player" and abs(obj.pos.x) < 0.1 and abs(obj.pos.y) < 0.1:
+                        estimated_area = obj.area
+                        break
+
+                target_pos, split, eject = self.get_action(objects, estimated_area)
+
+                self.scraper.move(target_pos[0],
+                                  target_pos[1], 5)
+
+                if split > 0:
+                    self.scraper.press_space()
+                if eject > 0:
+                    self.scraper.press_w()
+            else:
+                if self.alive:
+                    print("ModelBasedReflexAgent died. Calculating fitness...")
+                    stats = self.scraper.get_stats(wait=True)
+
+                    if stats is None:
+                        print("Warning: Failed to get stats for agent")
+                        self.alive = False
+                        return None
+
+                    food_eaten, time_alive, cells_eaten, highest_mass = stats
+                    fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass, 1)
+
+                    print(f"Fitness: {fitness:.2f} (Food: {food_eaten}, Time: {time_alive}s, "
+                          f"Cells: {cells_eaten}, Max Mass: {highest_mass})")
+
+                    self.alive = False
+                    return fitness
+
+            time.sleep(self.run_interval)
+
+        return None
+
+
 class SimpleReflexAgent(BaseAgent):
     """
     Simple reflex agent using rule-based decision-making instead of neural networks.
