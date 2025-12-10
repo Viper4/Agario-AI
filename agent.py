@@ -4,6 +4,9 @@ import geometry_utils
 import random
 import math
 import torch
+import copy
+import pickle
+from networks import DeepRNN, DeepLSTM, DeepGRU
 from image_processing import ImageProcessing
 from web_scraper import WebScraper
 
@@ -15,8 +18,8 @@ class Hyperparameters:
         self.run_interval = run_interval
         self.param_mutations = param_mutations
         self.move_sensitivity = move_sensitivity
-        self.grid_width = grid_width
-        self.grid_height = grid_height
+        self.grid_width = grid_width  # Number of columns
+        self.grid_height = grid_height  # Number of rows
         self.nodes_per_cell = nodes_per_cell
         self.input_size = grid_width * grid_height * self.nodes_per_cell
 
@@ -29,7 +32,7 @@ class Hyperparameters:
             hidden_layers=self.hidden_layers.copy(),
             output_size=self.output_size,
             run_interval=self.run_interval,
-            param_mutations=self.param_mutations.copy(),
+            param_mutations=copy.deepcopy(self.param_mutations),
             move_sensitivity=self.move_sensitivity,
             grid_width=self.grid_width,
             grid_height=self.grid_height,
@@ -134,83 +137,52 @@ class BaseAgent(threading.Thread):
             time.sleep(self.run_interval)
 
 
-class CustomRNN(torch.nn.Module):
-    def __init__(self, input_size: int, hidden_sizes: list[int], output_size: int, device: torch.device):
-        """
-        hidden_sizes: list like [16, 32, 20] meaning:
-            layer 0: 16 hidden units
-            layer 1: 32 hidden units
-            layer 2: 20 hidden units
-        """
-        super().__init__()
-
-        self.num_layers = len(hidden_sizes)
-        self.hidden_sizes = hidden_sizes
-        self.device = device
-
-        # Create RNNCell for each layer
-        self.cells = torch.nn.ModuleList()
-
-        for i, h in enumerate(hidden_sizes):
-            inp = input_size if i == 0 else hidden_sizes[i - 1]
-            self.cells.append(torch.nn.RNNCell(inp, h, device=self.device))
-
-        # Final linear output layer
-        self.fc = torch.nn.Linear(hidden_sizes[-1], output_size, device=self.device)
-
-    def forward(self, x, h=None):
-        """
-        x: (batch, seq_len, input_size)
-        h: list of hidden states for each layer (optional)
-        """
-        batch, seq_len, _ = x.size()
-
-        # Initialize hidden states if not provided
-        if h is None:
-            h = [
-                torch.zeros(batch, hs, device=self.device)
-                for hs in self.hidden_sizes
-            ]
-        else:
-            h = [state.to(self.device) for state in h]
-
-        inp = x[:, 0]
-        # Process sequence
-        for t in range(seq_len):
-            inp = x[:, t]
-
-            # Pass through each layer manually
-            for layer in range(self.num_layers):
-                h[layer] = self.cells[layer](inp, h[layer])
-                inp = h[layer]  # output of current layer is input to next
-
-        # Output from final layer goes to output head
-        out = self.fc(inp)
-        return out, h
-
-
-class RNNAgent(BaseAgent):
-    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+class TorchAgent(BaseAgent):
+    def __init__(self, network_class: type[DeepRNN | DeepLSTM | DeepGRU], hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
         super().__init__(hyperparameters.run_interval, fitness_weights)
         self.hyperparameters = hyperparameters
         self.device = device
 
-        self.rnn = CustomRNN(hyperparameters.input_size, hyperparameters.hidden_layers, hyperparameters.output_size, self.device)
+        self.network_class = network_class
+        self.net = network_class(hyperparameters.input_size, hyperparameters.hidden_layers, hyperparameters.output_size, self.device)
         self.hidden = None  # Hidden states for each layer (memory)
 
         # Randomize the parameters if specified
         if randomize_params:
-            for name, param in list(self.rnn.named_parameters()):
+            for name, param in list(self.net.named_parameters()):
                 sigma = 0
                 # Find the mutation hyperparam associated with this parameter
                 for key, value in hyperparameters.param_mutations.items():
                     if key in name:
-                        sigma = value
+                        sigma = value["strength"]
                         break
 
-                noise = torch.randn_like(param) * sigma  # Gaussian noise
+                noise = torch.randn_like(param) * sigma * 2  # Gaussian noise * 2 to start more spread out
                 param.data.add_(noise)
-        self.epsilon = 0.005
+        self.epsilon = 0.0001  # Reset mutation strengths to their original values if they go below this value
+
+    @staticmethod
+    def load_best_agent(snapshot_file: str, hyperparameters: Hyperparameters, fitness_weights: FitnessWeights):
+        """
+        Loads the best agent from a snapshot_file.
+        :param snapshot_file:
+        :param hyperparameters:
+        :param fitness_weights:
+        :return:
+        """
+        best_agent = None
+        with open(snapshot_file, "rb") as f:
+            state_dicts, agent_classes = pickle.load(f)
+            if agent_classes[0] == "RNN":
+                best_agent = RNNAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))
+            elif agent_classes[0] == "LSTM":
+                best_agent = LSTMAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))
+            elif agent_classes[0] == "GRU":
+                best_agent = GRUAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))
+            else:
+                raise ValueError(f"Unknown agent class: {agent_classes[0]}")
+            best_agent.net.load_state_dict(state_dicts[0])
+        return best_agent
 
     def forward(self, x):
         """
@@ -218,8 +190,12 @@ class RNNAgent(BaseAgent):
         :param x: input to the network
         :return: network's output
         """
-        output, h = self.rnn.forward(x.to(self.device), self.hidden)
-        self.hidden = h
+        result = self.net.forward(x.to(self.device), self.hidden)
+        if len(result) == 1:
+            output = result
+        else:
+            output, h = result
+            self.hidden = h
         return output
 
     def update_sigma(self, factor: float, base_param_mutations: dict):
@@ -227,28 +203,31 @@ class RNNAgent(BaseAgent):
         Reduce the standard deviation of mutation as the agent becomes more fit.
         Resets mutation standard deviation to original if it goes below epsilon.
         :param factor: factor to reduce standard deviation by
-        :param base_param_mutations: the original mutation standard deviations
+        :param base_param_mutations: the original mutation settings
         """
         for mutation in self.hyperparameters.param_mutations:
-            if self.hyperparameters.param_mutations[mutation] < self.epsilon:
-                self.hyperparameters.param_mutations[mutation] = base_param_mutations[mutation]
+            if self.hyperparameters.param_mutations[mutation]["strength"] < self.epsilon:
+                self.hyperparameters.param_mutations[mutation]["strength"] = base_param_mutations[mutation]["strength"]
             else:
-                self.hyperparameters.param_mutations[mutation] *= factor
+                self.hyperparameters.param_mutations[mutation]["strength"] *= factor
 
     def mutate(self):
         """
-        Mutates this agent's model parameters with normal distribution perturbations
+        Mutates this agent's network parameters with normal distribution perturbations
         """
-        for name, param in list(self.rnn.named_parameters()):
+        for name, param in list(self.net.named_parameters()):
             sigma = 0
+            chance = 0
             # Find the mutation hyperparam associated with this parameter
             for key, value in self.hyperparameters.param_mutations.items():
                 if key in name:
-                    sigma = value
+                    sigma = value["strength"]
+                    chance = value["chance"]
                     break
 
-            noise = torch.randn_like(param) * sigma  # Gaussian noise
-            param.data.add_(noise)
+            if random.random() < chance:
+                noise = torch.randn_like(param) * sigma  # Gaussian noise
+                param.data.add_(noise)
 
     def init_grid(self):
         """
@@ -329,9 +308,24 @@ class RNNAgent(BaseAgent):
         Creates a copy of this agent
         :return: copy of this agent
         """
-        copy = RNNAgent(self.hyperparameters.copy(), self.fitness_weights, False, self.device)
-        copy.rnn.load_state_dict(self.rnn.state_dict())
-        return copy
+        copied = TorchAgent(self.network_class, self.hyperparameters.copy(), self.fitness_weights, False, self.device)
+        copied.net.load_state_dict(self.net.state_dict())
+        return copied
+
+
+class RNNAgent(TorchAgent):
+    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+        super().__init__(DeepRNN, hyperparameters, fitness_weights, randomize_params, device)
+
+
+class LSTMAgent(TorchAgent):
+    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+        super().__init__(DeepLSTM, hyperparameters, fitness_weights, randomize_params, device)
+
+
+class GRUAgent(TorchAgent):
+    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+        super().__init__(DeepGRU, hyperparameters, fitness_weights, randomize_params, device)
 
 
 class MemoryItem:
@@ -340,10 +334,10 @@ class MemoryItem:
     """
     def __init__(self, obj_type: str, pos: tuple[float, float], priority: float, 
                  timestamp: int, area: float = 0.0, radius: float = 0.0):
-        self.obj_type = obj_type
+        self.obj_type = obj_type  # Food, player, virus
         self.pos = pos
-        self.priority = priority
-        self.timestamp = timestamp
+        self.priority = priority  # Priority of this item
+        self.timestamp = timestamp  # Tick that this item was added
         self.area = area
         self.radius = radius
         self.initial_priority = priority
@@ -541,6 +535,90 @@ class MemoryBuffer:
         return (dx * dx + dy * dy) < (threshold * threshold)
 
 
+class SimpleReflexAgent(BaseAgent):
+    """
+    Simple reflex agent using rule-based decision-making instead of neural networks.
+    """
+
+    VIRUS_DANGER_SIZE = 300.0
+    THREAT_SIZE_RATIO = 1.2
+    PREY_SIZE_RATIO = 0.8
+    SPLIT_DISTANCE_THRESHOLD = 350.0
+    VIRUS_AVOID_DISTANCE = 100.0
+
+    def __init__(self, run_interval: float, fitness_weights: FitnessWeights, move_sensitivity: float = 50.0):
+        super().__init__(run_interval, fitness_weights)
+        self.move_sensitivity = move_sensitivity
+        self.my_area = 0.0
+        self.last_action = (0.0, 0.0, 0.0, 0.0)
+
+    def get_action(self, threats: list, prey: list, foods: list, viruses: list, my_pos: tuple[float, float], min_area: float, max_area: float, my_radius: float):
+        """
+        Rule-based decision logic.
+        :param threats: List of visible threats
+        :param prey: List of visible prey
+        :param foods: List of visible foods
+        :param viruses: List of visible viruses
+        :param my_pos: Current position of the agent
+        :param min_area: Min area of parts of this player
+        :param max_area: Max area of parts of this player
+        :return: tuple of (move_x, move_y, split, eject)
+        """
+        self.my_area = max_area
+
+        target_pos = [my_pos[0], my_pos[1]]
+        split, eject = 0.0, 0.0
+
+        # Rule 1: Flee from threats (highest priority)
+        running = False
+        if threats:
+            closest_threat = min(threats, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+            threat_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_threat[0], closest_threat[1])
+            if threat_dist < self.SPLIT_DISTANCE_THRESHOLD * self.SPLIT_DISTANCE_THRESHOLD:
+                # Calculate direction away from threat
+                dx = my_pos[0] - closest_threat[0]
+                dy = my_pos[1] - closest_threat[1]
+                urgency = self.SPLIT_DISTANCE_THRESHOLD * self.SPLIT_DISTANCE_THRESHOLD - threat_dist
+                target_pos[0] = my_pos[0] + dx * urgency
+                target_pos[1] = my_pos[1] + dy * urgency
+                running = True
+
+        # Rule 2: Chase prey
+        if not running:
+            if prey:
+                closest_prey = min(prey, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+                prey_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_prey[0], closest_prey[1])
+                target_pos[0] = closest_prey[0]
+                target_pos[1] = closest_prey[1]
+
+                # Split attack if close enough and can eat after split
+                threshold = self.SPLIT_DISTANCE_THRESHOLD + my_radius
+                if prey_dist < threshold * threshold:
+                    half_my_area = min_area * 0.5
+                    if half_my_area * self.PREY_SIZE_RATIO > closest_prey[2]:
+                        split = 1.0
+            # Rule 3: Eat food
+            elif foods:
+                closest_food = min(foods, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+                target_pos[0] = closest_food[0]
+                target_pos[1] = closest_food[1]
+
+        # Virus avoidance (when large enough)
+        if viruses and self.my_area > self.VIRUS_DANGER_SIZE:
+            for virus in viruses:
+                virus_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], virus[0], virus[1])
+                avoid_dst_sqr = self.VIRUS_AVOID_DISTANCE * self.VIRUS_AVOID_DISTANCE
+                if virus_dist < avoid_dst_sqr:
+                    avoid_strength = (avoid_dst_sqr - virus_dist) / avoid_dst_sqr
+                    dx = virus[0] - my_pos[0]
+                    dy = virus[1] - my_pos[1]
+                    target_pos[0] -= dx * avoid_strength
+                    target_pos[1] -= dy * avoid_strength
+
+        self.last_action = (target_pos, split, eject)
+        return self.last_action
+
+
 class ModelBasedReflexAgent(BaseAgent):
     """
     Model-based reflex agent using rule-based decision making instead of neural networks.
@@ -614,8 +692,7 @@ class ModelBasedReflexAgent(BaseAgent):
         # Priority 2: Hunt prey or collect food
         if not running:
             if merged_prey:
-                closest_prey = min(merged_prey,
-                                   key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+                closest_prey = min(merged_prey, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
                 prey_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_prey[0], closest_prey[1])
                 target_pos[0], target_pos[1] = closest_prey[0], closest_prey[1]
                 has_target = True
@@ -707,162 +784,3 @@ class ModelBasedReflexAgent(BaseAgent):
 
         return None
 
-
-class SimpleReflexAgent(BaseAgent):
-    """
-    Simple reflex agent using rule-based decision-making instead of neural networks.
-    Only uses current observations without memory.
-    """
-
-    VIRUS_DANGER_SIZE = 300.0
-    THREAT_SIZE_RATIO = 1.1
-    PREY_SIZE_RATIO = 0.83
-    SPLIT_DISTANCE_THRESHOLD = 350.0
-    VIRUS_AVOID_DISTANCE = 100.0
-    EXPLORE_DISTANCE = 200.0
-
-    def __init__(self, run_interval: float, fitness_weights: FitnessWeights, move_sensitivity: float = 50.0,
-                 decay_factor: float = 0.985, priority_threshold: float = 0.05, 
-                 max_memory_size: int = 100, distance_weight_factor: float = 500.0):
-        super().__init__(run_interval, fitness_weights)
-        self.move_sensitivity = move_sensitivity
-        self.my_area = 0.0
-        self.last_action = (0.0, 0.0, 0.0, 0.0)
-        self.memory_buffer = MemoryBuffer(decay_factor=decay_factor, 
-                                         priority_threshold=priority_threshold,
-                                         max_size_per_type=max_memory_size,
-                                         distance_weight_factor=distance_weight_factor)
-        self.current_tick = 0
-        self.explore_direction = (1.0, 0.0)
-        self.explore_timer = 0
-        self.explore_duration = 60
-
-    def get_action(self, threats: list, prey: list, foods: list, viruses: list, my_pos: tuple[float, float], min_area: float, max_area: float, my_radius: float, current_tick: int = None):
-        """
-        Simple reflex decision logic - only uses current observations, no memory.
-        :param threats: List of visible threats
-        :param prey: List of visible prey
-        :param foods: List of visible foods
-        :param viruses: List of visible viruses
-        :param my_pos: Current position of the agent
-        :param min_area: Min area of parts of this player
-        :param max_area: Max area of parts of this player
-        :param my_radius: Maximum radius of player parts
-        :param current_tick: Current simulation tick (unused in SimpleReflexAgent)
-        :return: tuple of (target_pos, split, eject)
-        """
-        self.my_area = max_area
-        self.current_tick = current_tick if current_tick is not None else self.current_tick + 1
-
-        target_pos = [my_pos[0], my_pos[1]]
-        split, eject = 0.0, 0.0
-        has_target = False
-
-        split_threshold_sqr = self.SPLIT_DISTANCE_THRESHOLD * self.SPLIT_DISTANCE_THRESHOLD
-        running = False
-        
-        # Priority 1: Flee from threats
-        if threats:
-            closest_threat = min(threats, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
-            threat_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_threat[0], closest_threat[1])
-            if threat_dist < split_threshold_sqr:
-                dx, dy = my_pos[0] - closest_threat[0], my_pos[1] - closest_threat[1]
-                urgency = split_threshold_sqr - threat_dist
-                target_pos[0] = my_pos[0] + dx * urgency
-                target_pos[1] = my_pos[1] + dy * urgency
-                running = True
-                has_target = True
-
-        # Priority 2: Hunt prey or collect food
-        if not running:
-            if prey:
-                closest_prey = min(prey, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
-                prey_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_prey[0], closest_prey[1])
-                target_pos[0], target_pos[1] = closest_prey[0], closest_prey[1]
-                has_target = True
-                
-                attack_threshold = (self.SPLIT_DISTANCE_THRESHOLD + my_radius) ** 2
-                if prey_dist < attack_threshold and len(closest_prey) >= 3:
-                    if min_area * 0.5 * self.PREY_SIZE_RATIO > closest_prey[2]:
-                        split = 1.0
-            elif foods:
-                closest_food = min(foods, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
-                target_pos[0], target_pos[1] = closest_food[0], closest_food[1]
-                has_target = True
-
-        # Priority 3: Avoid viruses
-        if viruses and self.my_area > self.VIRUS_DANGER_SIZE:
-            avoid_dst_sqr = self.VIRUS_AVOID_DISTANCE * self.VIRUS_AVOID_DISTANCE
-            for virus in viruses:
-                virus_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], virus[0], virus[1])
-                if virus_dist < avoid_dst_sqr:
-                    avoid_strength = (avoid_dst_sqr - virus_dist) / avoid_dst_sqr
-                    dx = virus[0] - my_pos[0]
-                    dy = virus[1] - my_pos[1]
-                    target_pos[0] -= dx * avoid_strength
-                    target_pos[1] -= dy * avoid_strength
-                    has_target = True
-
-        # Priority 4: Explore when no target is found
-        if not has_target:
-            self.explore_timer += 1
-            if self.explore_timer >= self.explore_duration:
-                angle = random.uniform(0, 2 * math.pi)
-                self.explore_direction = (math.cos(angle), math.sin(angle))
-                self.explore_timer = 0
-            target_pos[0] = my_pos[0] + self.explore_direction[0] * self.EXPLORE_DISTANCE
-            target_pos[1] = my_pos[1] + self.explore_direction[1] * self.EXPLORE_DISTANCE
-
-        self.last_action = (target_pos, split, eject)
-        return self.last_action
-
-    def run_web_game(self, visualize: bool):
-        """
-        Run the agent on the real agar.io website using web scraper.
-        :param visualize: Whether to show visualization window
-        :return: Final fitness score or None if stats retrieval fails
-        """
-        self.start_web_game()
-
-        while self.program_running:
-            if self.scraper.in_game():
-                self.alive = True
-                objects = self.get_web_game_data(visualize=visualize)
-
-                estimated_area = 400.0
-                for obj in objects:
-                    if obj.label == "player" and abs(obj.pos.x) < 0.1 and abs(obj.pos.y) < 0.1:
-                        estimated_area = obj.area
-                        break
-
-                target_pos, split, eject = self.get_action(objects, estimated_area)
-
-                self.scraper.move(target_pos[0],
-                                  target_pos[1], 5)
-
-                if split > 0:
-                    self.scraper.press_space()
-                if eject > 0:
-                    self.scraper.press_w()
-            else:
-                if self.alive:
-                    print("SimpleReflexAgent died. Calculating fitness...")
-                    stats = self.scraper.get_stats(wait=True)
-
-                    if stats is None:
-                        print("Warning: Failed to get stats for agent")
-                        self.alive = False
-                        return None
-
-                    food_eaten, time_alive, cells_eaten, highest_mass = stats
-                    fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass, 1)
-
-                    print(f"Fitness: {fitness:.2f} (Food: {food_eaten}, Time: {time_alive}s, "
-                          f"Cells: {cells_eaten}, Max Mass: {highest_mass})")
-
-                    self.alive = False
-                    return fitness
-
-            time.sleep(self.run_interval)
-
-        return None

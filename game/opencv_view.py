@@ -238,9 +238,9 @@ class OCView:
             self.draw_debug(frame)
 
         if spectate_mode:
-            cv2.imshow("Training View", frame)
+            cv2.imshow("Spectating", frame)
             self.poll_spectate_keys(playercells)
         else:
-            cv2.imshow("Game", frame)
+            cv2.imshow("Playing", frame)
             self.poll_human_keys()
 
