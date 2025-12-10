@@ -5,6 +5,7 @@ import random
 import math
 import torch
 import copy
+from networks import DeepRNN, DeepLSTM, DeepGRU
 from image_processing import ImageProcessing
 from web_scraper import WebScraper
 
@@ -16,8 +17,8 @@ class Hyperparameters:
         self.run_interval = run_interval
         self.param_mutations = param_mutations
         self.move_sensitivity = move_sensitivity
-        self.grid_width = grid_width
-        self.grid_height = grid_height
+        self.grid_width = grid_width  # Number of columns
+        self.grid_height = grid_height  # Number of rows
         self.nodes_per_cell = nodes_per_cell
         self.input_size = grid_width * grid_height * self.nodes_per_cell
 
@@ -135,73 +136,19 @@ class BaseAgent(threading.Thread):
             time.sleep(self.run_interval)
 
 
-class CustomRNN(torch.nn.Module):
-    def __init__(self, input_size: int, hidden_sizes: list[int], output_size: int, device: torch.device):
-        """
-        hidden_sizes: list like [16, 32, 20] meaning:
-            layer 0: 16 hidden units
-            layer 1: 32 hidden units
-            layer 2: 20 hidden units
-        """
-        super().__init__()
-
-        self.num_layers = len(hidden_sizes)
-        self.hidden_sizes = hidden_sizes
-        self.device = device
-
-        # Create RNNCell for each layer
-        self.cells = torch.nn.ModuleList()
-
-        for i, h in enumerate(hidden_sizes):
-            inp = input_size if i == 0 else hidden_sizes[i - 1]
-            self.cells.append(torch.nn.RNNCell(inp, h, device=self.device))
-
-        # Final linear output layer
-        self.fc = torch.nn.Linear(hidden_sizes[-1], output_size, device=self.device)
-
-    def forward(self, x, h=None):
-        """
-        x: (batch, seq_len, input_size)
-        h: list of hidden states for each layer (optional)
-        """
-        batch, seq_len, _ = x.size()
-
-        # Initialize hidden states if not provided
-        if h is None:
-            h = [
-                torch.zeros(batch, hs, device=self.device)
-                for hs in self.hidden_sizes
-            ]
-        else:
-            h = [state.to(self.device) for state in h]
-
-        inp = x[:, 0]
-        # Process sequence
-        for t in range(seq_len):
-            inp = x[:, t]
-
-            # Pass through each layer manually
-            for layer in range(self.num_layers):
-                h[layer] = self.cells[layer](inp, h[layer])
-                inp = h[layer]  # output of current layer is input to next
-
-        # Output from final layer goes to output head
-        out = self.fc(inp)
-        return out, h
-
-
-class RNNAgent(BaseAgent):
-    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+class TorchAgent(BaseAgent):
+    def __init__(self, network_class: type[DeepRNN | DeepLSTM | DeepGRU], hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
         super().__init__(hyperparameters.run_interval, fitness_weights)
         self.hyperparameters = hyperparameters
         self.device = device
 
-        self.rnn = CustomRNN(hyperparameters.input_size, hyperparameters.hidden_layers, hyperparameters.output_size, self.device)
+        self.network_class = network_class
+        self.net = network_class(hyperparameters.input_size, hyperparameters.hidden_layers, hyperparameters.output_size, self.device)
         self.hidden = None  # Hidden states for each layer (memory)
 
         # Randomize the parameters if specified
         if randomize_params:
-            for name, param in list(self.rnn.named_parameters()):
+            for name, param in list(self.net.named_parameters()):
                 sigma = 0
                 # Find the mutation hyperparam associated with this parameter
                 for key, value in hyperparameters.param_mutations.items():
@@ -209,9 +156,9 @@ class RNNAgent(BaseAgent):
                         sigma = value["strength"]
                         break
 
-                noise = torch.randn_like(param) * sigma  # Gaussian noise
+                noise = torch.randn_like(param) * sigma * 2  # Gaussian noise * 2 to start more spread out
                 param.data.add_(noise)
-        self.epsilon = 0.005
+        self.epsilon = 0.0001  # Reset mutation strengths to their original values if they go below this value
 
     def forward(self, x):
         """
@@ -219,8 +166,12 @@ class RNNAgent(BaseAgent):
         :param x: input to the network
         :return: network's output
         """
-        output, h = self.rnn.forward(x.to(self.device), self.hidden)
-        self.hidden = h
+        result = self.net.forward(x.to(self.device), self.hidden)
+        if len(result) == 1:
+            output = result
+        else:
+            output, h = result
+            self.hidden = h
         return output
 
     def update_sigma(self, factor: float, base_param_mutations: dict):
@@ -238,9 +189,9 @@ class RNNAgent(BaseAgent):
 
     def mutate(self):
         """
-        Mutates this agent's model parameters with normal distribution perturbations
+        Mutates this agent's network parameters with normal distribution perturbations
         """
-        for name, param in list(self.rnn.named_parameters()):
+        for name, param in list(self.net.named_parameters()):
             sigma = 0
             chance = 0
             # Find the mutation hyperparam associated with this parameter
@@ -333,9 +284,24 @@ class RNNAgent(BaseAgent):
         Creates a copy of this agent
         :return: copy of this agent
         """
-        copy = RNNAgent(self.hyperparameters.copy(), self.fitness_weights, False, self.device)
-        copy.rnn.load_state_dict(self.rnn.state_dict())
-        return copy
+        copied = TorchAgent(self.network_class, self.hyperparameters.copy(), self.fitness_weights, False, self.device)
+        copied.net.load_state_dict(self.net.state_dict())
+        return copied
+
+
+class RNNAgent(TorchAgent):
+    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+        super().__init__(DeepRNN, hyperparameters, fitness_weights, randomize_params, device)
+
+
+class LSTMAgent(TorchAgent):
+    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+        super().__init__(DeepLSTM, hyperparameters, fitness_weights, randomize_params, device)
+
+
+class GRUAgent(TorchAgent):
+    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+        super().__init__(DeepGRU, hyperparameters, fitness_weights, randomize_params, device)
 
 
 class MemoryItem:
@@ -551,8 +517,8 @@ class SimpleReflexAgent(BaseAgent):
     """
 
     VIRUS_DANGER_SIZE = 300.0
-    THREAT_SIZE_RATIO = 1.17
-    PREY_SIZE_RATIO = 0.83
+    THREAT_SIZE_RATIO = 1.2
+    PREY_SIZE_RATIO = 0.8
     SPLIT_DISTANCE_THRESHOLD = 350.0
     VIRUS_AVOID_DISTANCE = 100.0
 
@@ -628,58 +594,6 @@ class SimpleReflexAgent(BaseAgent):
         self.last_action = (target_pos, split, eject)
         return self.last_action
 
-    def run_web_game(self, visualize: bool):
-        """
-        Run the agent on the real agar.io website using web scraper.
-        :param visualize: Whether to show visualization window
-        :return: Final fitness score or None if stats retrieval fails
-        """
-        self.start_web_game()
-
-        while self.program_running:
-            if self.scraper.in_game():
-                self.alive = True
-                objects = self.get_web_game_data(visualize=visualize)
-
-                # Estimate own size from nearby player objects
-                estimated_area = 400.0
-                for obj in objects:
-                    if obj.label == "player" and abs(obj.pos.x) < 0.1 and abs(obj.pos.y) < 0.1:
-                        estimated_area = obj.area
-                        break
-
-                target_pos, split, eject = self.get_action(objects, estimated_area)
-
-                self.scraper.move(target_pos[0],
-                                  target_pos[1], 5)
-
-                if split > 0:
-                    self.scraper.press_space()
-                if eject > 0:
-                    self.scraper.press_w()
-            else:
-                if self.alive:
-                    print("SimpleReflexAgent died. Calculating fitness...")
-                    stats = self.scraper.get_stats(wait=True)
-
-                    if stats is None:
-                        print("Warning: Failed to get stats for agent")
-                        self.alive = False
-                        return None
-
-                    food_eaten, time_alive, cells_eaten, highest_mass = stats
-                    fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass, 1)
-
-                    print(f"Fitness: {fitness:.2f} (Food: {food_eaten}, Time: {time_alive}s, "
-                          f"Cells: {cells_eaten}, Max Mass: {highest_mass})")
-
-                    self.alive = False
-                    return fitness
-
-            time.sleep(self.run_interval)
-
-        return None
-
 
 class ModelBasedReflexAgent(BaseAgent):
     """
@@ -687,8 +601,8 @@ class ModelBasedReflexAgent(BaseAgent):
     """
 
     VIRUS_DANGER_SIZE = 300.0
-    THREAT_SIZE_RATIO = 1.17
-    PREY_SIZE_RATIO = 0.83
+    THREAT_SIZE_RATIO = 1.2
+    PREY_SIZE_RATIO = 0.8
     SPLIT_DISTANCE_THRESHOLD = 350.0
     VIRUS_AVOID_DISTANCE = 100.0
 
@@ -771,53 +685,3 @@ class ModelBasedReflexAgent(BaseAgent):
         self.last_action = (target_pos, split, eject)
         return self.last_action
 
-    def run_web_game(self, visualize: bool):
-        """
-        Run the agent on the real agar.io website using web scraper.
-        :param visualize: Whether to show visualization window
-        :return: Final fitness score or None if stats retrieval fails
-        """
-        self.start_web_game()
-
-        while self.program_running:
-            if self.scraper.in_game():
-                self.alive = True
-                objects = self.get_web_game_data(visualize=visualize)
-
-                estimated_area = 400.0
-                for obj in objects:
-                    if obj.label == "player" and abs(obj.pos.x) < 0.1 and abs(obj.pos.y) < 0.1:
-                        estimated_area = obj.area
-                        break
-
-                target_pos, split, eject = self.get_action(objects, estimated_area)
-
-                self.scraper.move(target_pos[0],
-                                  target_pos[1], 5)
-
-                if split > 0:
-                    self.scraper.press_space()
-                if eject > 0:
-                    self.scraper.press_w()
-            else:
-                if self.alive:
-                    print("SimpleReflexAgent died. Calculating fitness...")
-                    stats = self.scraper.get_stats(wait=True)
-
-                    if stats is None:
-                        print("Warning: Failed to get stats for agent")
-                        self.alive = False
-                        return None
-
-                    food_eaten, time_alive, cells_eaten, highest_mass = stats
-                    fitness = self.calculate_fitness(food_eaten, time_alive, cells_eaten, highest_mass, 1)
-
-                    print(f"Fitness: {fitness:.2f} (Food: {food_eaten}, Time: {time_alive}s, "
-                          f"Cells: {cells_eaten}, Max Mass: {highest_mass})")
-
-                    self.alive = False
-                    return fitness
-
-            time.sleep(self.run_interval)
-
-        return None

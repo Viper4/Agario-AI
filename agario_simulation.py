@@ -8,7 +8,7 @@ from game.opencv_view import OCView, OCCamera
 from game.view import View
 from game.model import Model
 from game.entities import Player
-from agent import RNNAgent, SimpleReflexAgent, ModelBasedReflexAgent, Hyperparameters, FitnessWeights
+from agent import RNNAgent, LSTMAgent, GRUAgent, SimpleReflexAgent, ModelBasedReflexAgent, Hyperparameters, FitnessWeights
 
 
 class AgarioSimulation:
@@ -129,7 +129,7 @@ class AgarioSimulation:
         return agent.get_action(threats, prey, foods, viruses, center_pos, min_area, max_area, max_radius, simulation_tick)
 
     @staticmethod
-    def generate_vision_grid_v1(agent: RNNAgent, center_pos: tuple[float, float], model: Model, view_bounds: tuple[tuple[float, float], tuple[float, float]]):
+    def generate_vision_grid_v1(agent: RNNAgent | LSTMAgent | GRUAgent, center_pos: tuple[float, float], model: Model, view_bounds: tuple[tuple[float, float], tuple[float, float]]):
         """
         Generates a vision grid where each grid cell is (food_count, virus_count, playercell_count, area).
         Each node value is normalized by the maximum value of that type in the entire grid.
@@ -211,10 +211,10 @@ class AgarioSimulation:
         return vision_grid
 
     @staticmethod
-    def generate_vision_grid_v2(agent: RNNAgent, center_pos: tuple[float, float], model: Model,
+    def generate_vision_grid_v2(agent: RNNAgent | LSTMAgent | GRUAgent, center_pos: tuple[float, float], model: Model,
                                 view_bounds: tuple[tuple[float, float], tuple[float, float]]):
         """
-        Generates a vision grid where each grid cell is (food_area, virus_area, player_area).
+        Generates a vision grid where each grid cell is (food_perimeter, virus_perimeter, player_perimeter).
         Each node value is normalized by the maximum value of that type in the entire grid.
         :param agent: RNNAgent to generate the vision grid for
         :param center_pos: Center position of the view
@@ -223,9 +223,9 @@ class AgarioSimulation:
         :return: torch.Tensor of shape (grid_width, grid_height, nodes_per_cell)
         """
         vision_grid = agent.init_grid()
-        max_food_area = 0.0
-        max_virus_area = 0.0
-        max_player_area = 0.0
+        max_food_perimeter = 0.0
+        max_virus_perimeter = 0.0
+        max_player_perimeter = 0.0
 
         # view_bounds = (top left, bottom right)
         view_width = view_bounds[1][0] - view_bounds[0][0]
@@ -242,10 +242,10 @@ class AgarioSimulation:
 
                     gx, gy = agent.get_grid_index(normalized_pos)
                     grid_cell = vision_grid[gx, gy]
-                    grid_cell[0] += cell.area()  # Food area
+                    grid_cell[0] += cell.perimeter()
 
-                    if grid_cell[0] > max_food_area:
-                        max_food_area = grid_cell[0]
+                    if grid_cell[0] > max_food_perimeter:
+                        max_food_perimeter = grid_cell[0]
             for virus in chunk.viruses:
                 if virus.within_bounds(view_bounds):
                     # Normalize global position to relative position in the view bounds from [-1, 1]
@@ -254,10 +254,10 @@ class AgarioSimulation:
 
                     gx, gy = agent.get_grid_index(normalized_pos)
                     grid_cell = vision_grid[gx, gy]
-                    grid_cell[1] += virus.area()
+                    grid_cell[1] += virus.perimeter()
 
-                    if grid_cell[1] > max_virus_area:
-                        max_virus_area = grid_cell[1]
+                    if grid_cell[1] > max_virus_perimeter:
+                        max_virus_perimeter = grid_cell[1]
             for playercell in chunk.playercells:
                 if playercell.within_bounds(view_bounds):
                     # Normalize global position to relative position in the view bounds from [-1, 1]
@@ -266,14 +266,15 @@ class AgarioSimulation:
 
                     gx, gy = agent.get_grid_index(normalized_pos)
                     grid_cell = vision_grid[gx, gy]
-                    grid_cell[2] += playercell.area()
+                    grid_cell[2] += playercell.perimeter()
 
-                    if grid_cell[2] > max_player_area:
-                        max_player_area = grid_cell[2]
+                    if grid_cell[2] > max_player_perimeter:
+                        max_player_perimeter = grid_cell[2]
 
         # Normalize nodes in grid using vectorized division
+        #print(max_food_perimeter, max_virus_perimeter, max_player_perimeter)
         vision_grid /= torch.tensor(
-            [max_food_area, max_virus_area, max_player_area],
+            [100.0, 330.0, 8000.0],  # Absolute max values determined manually
             device=vision_grid.device,
             dtype=vision_grid.dtype
         )
@@ -281,12 +282,12 @@ class AgarioSimulation:
         return vision_grid
 
     @staticmethod
-    def rnn_tick(view_width: int, view_height: int, agent: RNNAgent, player: Player, model: Model):
+    def rnn_tick(view_width: int, view_height: int, agent: RNNAgent | LSTMAgent | GRUAgent, player: Player, model: Model):
         """
         Runs a single tick of the simulation for the given RNN agent.
         :param view_width: Width of the view
         :param view_height: Height of the view
-        :param agent: RNNAgent to make actions with during simulation
+        :param agent: agent to make actions with during simulation
         :param player: Player to make actions for
         :param model: Model to use for simulation
         :return: The agent's (target_pos, split, eject)
@@ -304,7 +305,7 @@ class AgarioSimulation:
         view_bounds = ((center_pos[0] - half_view_width, center_pos[1] + half_view_height),
                        (center_pos[0] + half_view_width, center_pos[1] - half_view_height))
 
-        vision_grid = AgarioSimulation.generate_vision_grid_v1(agent, center_pos, model, view_bounds)
+        vision_grid = AgarioSimulation.generate_vision_grid_v2(agent, center_pos, model, view_bounds)
 
         move_x, move_y, split, eject = agent.get_action(vision_grid)
 
@@ -313,7 +314,7 @@ class AgarioSimulation:
 
         return target_pos, split, eject
 
-    def run(self, agents: list[RNNAgent], num_sra: int, base_fps: int, simulation_duration: float, headless: bool):
+    def run(self, agents: list[RNNAgent | LSTMAgent | GRUAgent], num_sra: int, base_fps: int, simulation_duration: float, headless: bool):
         """
         Run a simulation with the RNN agents and a number of SRAs.
         Stops when the duration is reached or when only 1 agent is alive.
@@ -527,22 +528,30 @@ def main():
 
     bounds = [args.bounds, args.bounds]
 
-    # Load best RNNAgent from agent_snapshots.pkl
-    hyperparameters = Hyperparameters(hidden_layers=[64, 16],
+    # Load best agent from snapshots file
+    hyperparameters = Hyperparameters(hidden_layers=[72],
                                       output_size=4,
                                       run_interval=0.1,
-                                      param_mutations={"weight": {"strength": 2.0, "chance": 0.05}, "bias": {"strength": 0.5, "chance": 0.025}},
+                                      param_mutations={"weight": {"strength": 1.0, "chance": 0.05}, "bias": {"strength": 0.25, "chance": 0.025}},
                                       move_sensitivity=50.0,
-                                      grid_width=9,
-                                      grid_height=6,
-                                      nodes_per_cell=4)
+                                      grid_width=12,
+                                      grid_height=8,
+                                      nodes_per_cell=3)
     fitness_weights = FitnessWeights(food=0.1, time_alive=100.0, cells_eaten=50.0, score=0.9, death=500.0)
-    base_rnn = RNNAgent(hyperparameters=hyperparameters.copy(), fitness_weights=fitness_weights,
-                        randomize_params=False, device=torch.device("cpu"))
-    with open("agent_snapshots.pkl", "rb") as f:
-        agent_snapshots = pickle.load(f)
+    base_rnn = None
+    with open("rnn_snapshots.pkl", "rb") as f:
+        state_dicts, agent_classes = pickle.load(f)
+        if agent_classes[0] == "RNN":
+            base_rnn = RNNAgent(hyperparameters=hyperparameters.copy(), fitness_weights=fitness_weights,
+                                randomize_params=False, device=torch.device("cpu"))
+        elif agent_classes[0] == "LSTM":
+            base_rnn = LSTMAgent(hyperparameters=hyperparameters.copy(), fitness_weights=fitness_weights,
+                                 randomize_params=False, device=torch.device("cpu"))
+        elif agent_classes[0] == "GRU":
+            base_rnn = GRUAgent(hyperparameters=hyperparameters.copy(), fitness_weights=fitness_weights,
+                                randomize_params=False, device=torch.device("cpu"))
         # Snapshots are saved in order of fitness
-        base_rnn.rnn.load_state_dict(agent_snapshots[0])
+        base_rnn.net.load_state_dict(state_dicts[0])
 
     # Create model and players
     human_player = Player.make_random(args.nick, bounds)
