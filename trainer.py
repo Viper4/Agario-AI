@@ -46,13 +46,18 @@ def run_simulation_worker(fps: int, simulation_duration: float, state_dicts: lis
                                              bounds=2000,
                                              food_count=700,
                                              virus_count=20)
-    # Run with predators
-    return sim.run(agents, len(agents) // 2, fps, simulation_duration, headless)
+    if generation <= 25:
+        # Run without predators
+        return sim.run(agents, 0, fps, simulation_duration, headless)
+    else:
+        # Run with predators
+        return sim.run(agents, len(agents) // 2, fps, simulation_duration, headless)
 
 
 class GeneticTrainer:
     def __init__(self, init_rnn_prop: float, init_lstm_prop: float, init_gru_prop: float, population_size: int,
                  hyperparameters: Hyperparameters, fitness_weights: FitnessWeights, save_file: str,
+                 extinction_threshold: int,
                  max_generations: int | None = None):
         if init_rnn_prop + init_lstm_prop + init_gru_prop != 1:
             raise ValueError("init_rnn_prop, init_lstm_prop, and init_gru_prop must sum to 1")
@@ -63,6 +68,8 @@ class GeneticTrainer:
         self.hyperparameters = hyperparameters
         self.fitness_weights = fitness_weights
         self.save_file = save_file
+        self.extinction_threshold = extinction_threshold  # Number of generations to wait before extinction
+        self.extinction_counters = {"RNN": 0, "LSTM": 0, "GRU": 0}
         self.max_generations = max_generations
         self.population = []
 
@@ -143,17 +150,17 @@ class GeneticTrainer:
             child = agent_class(parent1.hyperparameters.copy(), fitness_weights=parent1.fitness_weights,
                                 randomize_params=False, device=torch.device("cpu"))
 
-            '''# Crossover from both parents
+            # Crossover from both parents
             # Random crossover 50% chance for either parent at every parameter
             for (param1, param2, param_child) in zip(
-                        parent1.rnn.parameters(),
-                        parent2.rnn.parameters(),
-                        child.rnn.parameters()):
+                        parent1.net.parameters(),
+                        parent2.net.parameters(),
+                        child.net.parameters()):
                 # Random binary mask for mixing parameters
                 mask = torch.rand_like(param1) < 0.5
                 param_child.data.copy_(
                     torch.where(mask, param1.data, param2.data)
-                )'''
+                )
 
             child.mutate()
             child.update_sigma(factor=0.95, base_param_mutations=self.hyperparameters.param_mutations)
@@ -162,7 +169,7 @@ class GeneticTrainer:
 
     def tournament_selection(self, subset: list[int], k: int = 3):
         """
-        Returns index of best parent from random sample of k agents from the population[:num_parents]
+        Returns index of best parent from random sample of k agents from the subset
         :param subset: List of indices of agents to select from
         :param k: Number of candidates in the tournament
         :return: Index of best parent from the tournament
@@ -177,11 +184,23 @@ class GeneticTrainer:
                 best_fitness = fitness
         return best_i
 
-    def train(self, load_from_file: bool, num_simulations: int):
+    def random_parents(self):
+        """
+        Returns two random indices with the same RNN type from the top half of the population
+        :return:
+        """
+        parent1 = random.randint(0, self.population_size // 2)
+        parent2 = random.randint(0, self.population_size // 2)
+        while type(self.population[parent1]) != type(self.population[parent2]):
+            parent2 = random.randint(0, self.population_size // 2)  # Keep trying until we get a match
+        return parent1, parent2
+
+    def train(self, load_from_file: bool, num_simulations: int, headless: bool):
         """
         Starts the training loop
         :param load_from_file: Whether to load the population from file.
         :param num_simulations: Number of simulations to run per generation.
+        :param headless: Whether to run the simulation(s) headless.
         :return: Final population
         """
         generation = 0
@@ -213,7 +232,7 @@ class GeneticTrainer:
                 for i in range(num_simulations):
                     jobs.append(pool.apply_async(
                         run_simulation_worker,
-                        args=(60, 300, state_dicts, agent_classes, pickled_data, True, generation,)
+                        args=(60, 300, state_dicts, agent_classes, pickled_data, headless, generation,)
                     ))
 
                 pool.close()  # no more tasks
@@ -237,9 +256,12 @@ class GeneticTrainer:
 
             self.population.sort(key=lambda x: x.avg_fitness, reverse=True)
             # Split up agents into their types for reproduction pools
-            rnn_agent_indices = []
-            lstm_agent_indices = []
-            gru_agent_indices = []
+            rnn_indices = []
+            lstm_indices = []
+            gru_indices = []
+            rnn_reproduce_pool = []
+            lstm_reproduce_pool = []
+            gru_reproduce_pool = []
 
             # Save agent parameters and class types to file
             with open(self.save_file, "wb") as f:
@@ -251,71 +273,104 @@ class GeneticTrainer:
                     if isinstance(agent, RNNAgent):
                         agent_classes.append("RNN")
                         if i < self.population_size // 2:
-                            rnn_agent_indices.append(i)  # Add to reproduction pool
+                            rnn_reproduce_pool.append(i)  # Add to reproduction pool
+                        rnn_indices.append(i)
                     elif isinstance(agent, LSTMAgent):
                         agent_classes.append("LSTM")
                         if i < self.population_size // 2:
-                            lstm_agent_indices.append(i)
+                            lstm_reproduce_pool.append(i)
+                        lstm_indices.append(i)
                     elif isinstance(agent, GRUAgent):
                         agent_classes.append("GRU")
                         if i < self.population_size // 2:
-                            gru_agent_indices.append(i)
+                            gru_reproduce_pool.append(i)
+                        gru_indices.append(i)
                 pickle.dump((agent_state_dicts, agent_classes), f)  # Save agents in order of fitness
 
             # Create new population
             new_population = []
 
             num_elites = self.population_size // 10
-            #num_parents = self.population_size // 2 - num_elites
-            child_counts = [0] * self.population_size
+            child_counts = [0] * self.population_size  # For statistics printing
+
+            # Count number of each RNN type that will be in next generation
+            num_rnns = 0
+            num_lstms = 0
+            num_grus = 0
 
             # Elitism
             for i in range(num_elites):
                 new_population.append(self.population[i])
+                if isinstance(self.population[i], RNNAgent):
+                    num_rnns += 1
+                elif isinstance(self.population[i], LSTMAgent):
+                    num_lstms += 1
+                elif isinstance(self.population[i], GRUAgent):
+                    num_grus += 1
 
             # Calculate number of children needed to fill population
             diff = self.population_size - num_elites
 
             # Tournament selection
             for i in range(diff):
+                # Default parents are random parents from top half
+                parent1, parent2 = self.random_parents()
+
                 # Tournament selection
                 if isinstance(self.population[i], RNNAgent):
-                    parent1 = self.tournament_selection(rnn_agent_indices)
-                    parent2 = self.tournament_selection(rnn_agent_indices)
+                    if len(rnn_reproduce_pool) > 0:
+                        self.extinction_counters["RNN"] = 0
+                        parent1 = self.tournament_selection(rnn_reproduce_pool)
+                        parent2 = self.tournament_selection(rnn_reproduce_pool)
+                        num_rnns += 1
+                    elif num_rnns < max(1, len(rnn_indices) - 1):  # Shrink offspring by 1 but maintain at least 1 child
+                        self.extinction_counters["RNN"] += 1
+                        if self.extinction_counters["RNN"] < self.extinction_threshold:
+                            # Protect against early extinction and force reproduce
+                            parent1 = self.tournament_selection(rnn_indices)
+                            parent2 = self.tournament_selection(rnn_indices)
+                            num_rnns += 1
                 elif isinstance(self.population[i], LSTMAgent):
-                    parent1 = self.tournament_selection(lstm_agent_indices)
-                    parent2 = self.tournament_selection(lstm_agent_indices)
+                    if len(lstm_reproduce_pool) > 0:
+                        self.extinction_counters["LSTM"] = 0
+                        parent1 = self.tournament_selection(lstm_reproduce_pool)
+                        parent2 = self.tournament_selection(lstm_reproduce_pool)
+                        num_lstms += 1
+                    elif num_lstms < max(1, len(lstm_indices) - 1):  # Shrink offspring by 1 but maintain at least 1 child
+                        self.extinction_counters["LSTM"] += 1
+                        if self.extinction_counters["LSTM"] < self.extinction_threshold:
+                            # Protect against early extinction and force reproduce
+                            parent1 = self.tournament_selection(lstm_indices)
+                            parent2 = self.tournament_selection(lstm_indices)
+                            num_lstms += 1
                 elif isinstance(self.population[i], GRUAgent):
-                    parent1 = self.tournament_selection(gru_agent_indices)
-                    parent2 = self.tournament_selection(gru_agent_indices)
+                    if len(gru_reproduce_pool) > 0:
+                        self.extinction_counters["GRU"] = 0
+                        parent1 = self.tournament_selection(gru_reproduce_pool)
+                        parent2 = self.tournament_selection(gru_reproduce_pool)
+                        num_grus += 1
+                    elif num_grus < max(1, len(gru_indices) - 1):  # Shrink offspring by 1 but maintain at least 1 child
+                        self.extinction_counters["GRU"] += 1
+                        if self.extinction_counters["GRU"] < self.extinction_threshold:
+                            # Protect against early extinction and force reproduce
+                            parent1 = self.tournament_selection(gru_indices)
+                            parent2 = self.tournament_selection(gru_indices)
+                            num_grus += 1
                 else:
                     raise ValueError(f"Unknown agent type: {type(self.population[i])}")
+
                 children = self.reproduce(self.population[parent1], self.population[parent2], 1)
                 new_population.extend(children)
                 child_counts[parent1] += 1
-                child_counts[parent2] += 1
-
-            # Pair mating
-            '''for i in range(0, num_parents, 2):
-                if i+1 >= self.population_size:
-                    break
-                # Reproduce in pairs: 0: (0,1), 1: (2,3),..., floor(n/4): (floor(n/2)-1,floor(n/2))
-                parent1 = self.population[i]
-                parent2 = self.population[i + 1]
-
-                # Linear allocation of children based on rank
-                a = 4
-                b = a / num_parents
-                children = self.reproduce(parent1, parent2, round(a-b*i + a-b*(i+1)))
-                child_counts[i] = len(children)
-                child_counts[i + 1] = len(children)
-                new_population.extend(children)'''
+                if parent1 != parent2:
+                    child_counts[parent2] += 1
 
             # Print generation statistics
             print(f"Generation {generation} complete")
             print(f"Mean fitness: {total_final_fitness / self.population_size:.2f}")
             print(f"Fitness standard deviation: {np.std([x.avg_fitness for x in self.population]).item():.4f}")
             print(f"Mutation strengths: {self.population[0].hyperparameters.param_mutations}")
+            print(f"Next generation: {num_rnns} RNNAgents, {num_lstms} LSTMAgents, {num_grus} GRUAgents")
             individual_string = ""
             for i in range(num_simulations):
                 individual_string += "\t| Sim " + str(i + 1) + " Fitness"
@@ -357,5 +412,6 @@ if __name__ == "__main__":
                              population_size=int(input("Enter population size> ")),
                              hyperparameters=hyperparameters,
                              fitness_weights=fitness_weights,
-                             save_file="agent_snapshots.pkl")
-    trainer.train(load_from_file=True, num_simulations=6)
+                             save_file="agent_snapshots.pkl",
+                             extinction_threshold=5)
+    trainer.train(load_from_file=True, num_simulations=5, headless=True)

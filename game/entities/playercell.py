@@ -40,6 +40,7 @@ class PlayerCell(Cell, interfaces.Killer):
         self.area_pool = 0
         self.decay_timer = self.DECAY_TIME * 60  # Lose 1 radius every x*60 frames
         self.parent = None
+        self.ticks_starving = 0
 
     def check_merge(self):
         """
@@ -76,9 +77,15 @@ class PlayerCell(Cell, interfaces.Killer):
 
         # Decay mass
         self.decay_timer -= 1
-        if self.radius > self.MIN_RADIUS and self.decay_timer <= 0:
-            self.radius -= 1
-            self.decay_timer = self.DECAY_TIME * 60
+        if self.radius > self.MIN_RADIUS:
+            self.ticks_starving = 0
+            if self.decay_timer <= 0:
+                self.radius -= 1
+                self.decay_timer = self.DECAY_TIME * 60
+        else:
+            self.ticks_starving += 1
+            if self.ticks_starving >= 1800:  # Starving for 30 seconds then die
+                self.parent.remove_part(self)
 
     def __add_area(self, area):
         """Increase current cell area with passed area."""
