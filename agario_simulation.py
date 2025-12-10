@@ -314,9 +314,9 @@ class AgarioSimulation:
 
         return target_pos, split, eject
 
-    def run(self, agents: list[RNNAgent | LSTMAgent | GRUAgent], num_sra: int, base_fps: int, simulation_duration: float, headless: bool):
+    def run_training(self, agents: list[RNNAgent | LSTMAgent | GRUAgent], num_sra: int, base_fps: int, simulation_duration: float, headless: bool):
         """
-        Run a simulation with the RNN agents and a number of SRAs.
+        Run a simulation meant for training with the RNN agents and a number of SRAs.
         Stops when the duration is reached or when only 1 agent is alive.
         :param agents: List of RNN agents to spawn
         :param num_sra: Number of SRAs to spawn
@@ -430,86 +430,52 @@ class AgarioSimulation:
         print(f"Simulation complete after {time.time() - start_time:.2f} seconds with {rnn_agents_alive} RNN agents alive and {sras_alive} SRAs alive")
         return fitnesses
     
-    def run_mbra(self, agent: ModelBasedReflexAgent, base_fps: int, simulation_duration: float, headless: bool):
-        """
-        Run a simulation with only SimpleReflexAgent.
-        Stops when the duration is reached or when only 1 agent is alive.
-        :param agent: Single ModelBasedReflexAgent to make actions with during simulation
-        :param base_fps: Frames per second for a game at normal speed.
-        :param simulation_duration: How long the simulation runs in seconds. Doesn't mean termination will occur at this time.
-        :param headless: Whether to draw the game's visuals.
-        :return: Fitness value for the agent
-        """
-        num_frames = int(simulation_duration * base_fps)
-        
-        bounds = [self.bounds, self.bounds]
-        
-        mbra_player = Player.make_random("MBRA Agent", bounds, color=(255, 0, 0))
-        prev_target_pos = mbra_player.center()
-        
-        model = Model([mbra_player], bounds=bounds, chunk_size=self.bounds // 10)
-        model.spawn_cells(self.food_count)
-        model.spawn_viruses(self.virus_count)
-        print(f"MBRA Simulation model initialized with {model.chunk_count_x}x{model.chunk_count_y}={model.chunk_count_x*model.chunk_count_y} chunks.")
-        
-        view = None
-        if not headless:
-            view = OCView(self.view_width, self.view_height, model, mbra_player, debug=False)
-        
-        start_time = time.time()
-        last_agent_run_frame = -100
-        
-        for frame in tqdm(range(num_frames), desc="Running MBRA simulation", unit="frames"):
-            if model.num_viruses < self.virus_count:
-                model.spawn_viruses(self.virus_count - model.num_viruses)
-            if model.num_cells < self.food_count:
-                model.spawn_cells(self.food_count - model.num_cells)
-            
-            if not mbra_player.alive:
-                break
-            
-            run_agent = frame - last_agent_run_frame >= agent.run_interval * base_fps
-            
-            if mbra_player.alive:
-                mbra_player.ticks_alive += 1
-                if run_agent:
-                    target_pos, split, eject = AgarioSimulation.mbra_tick(
-                        self.view_width, self.view_height, agent, mbra_player, model, frame
-                    )
-                    
-                    if split > 0:
-                        model.split(mbra_player, target_pos)
-                    if eject > 0:
-                        model.shoot(mbra_player, target_pos)
-                    prev_target_pos = target_pos
-                    last_agent_run_frame = frame
-                
-                model.update_velocity(mbra_player, prev_target_pos)
-            
-            model.update()
-            
-            if not headless and view is not None:
-                target_score = mbra_player.score()
-                inv_scale = OCCamera.get_inverse_scale(target_score)
-                view.camera.scale = 1.0 / inv_scale
-                view.redraw(spectate_mode=True)
-        
-        fitness = agent.calculate_fitness(
-            mbra_player.num_food_eaten,
-            mbra_player.ticks_alive / num_frames,
-            mbra_player.num_players_eaten,
-            mbra_player.score(),
-            int(not mbra_player.alive)
-        )
-        
-        print(f"MBRA Simulation complete after {time.time() - start_time:.2f} seconds")
-        print(f"Agent alive: {mbra_player.alive}, Fitness: {fitness:.2f}")
-        print(f"Stats - Food eaten: {mbra_player.num_food_eaten}, "
-              f"Players eaten: {mbra_player.num_players_eaten}, "
-              f"Score: {mbra_player.score():.2f}, "
-              f"Time alive: {mbra_player.ticks_alive / num_frames:.2%}")
-        
-        return fitness
+    def run_evaluation(self, agents: list[RNNAgent | LSTMAgent | GRUAgent], num_sra: int, num_mbra: int, base_fps: int, simulation_duration: float, headless: bool):
+        pass
+
+
+# Function needs to be picklable so keep it out of classes
+def run_simulation_worker(fps: int, simulation_duration: float, state_dicts: list[dict], agent_classes: list[str],
+                          pickled_data: bytes, headless: bool, generation: int):
+    """
+    Function intended for parallel processing which reconstructs agents and runs a simulation with them.
+    Returns final fitness of all the agents in this simulation.
+    :param fps: "Normal" frames per second for simulation. Basically, defines how fast a normal game runs for humans.
+    :param simulation_duration: Duration of simulation in seconds
+    :param state_dicts: List of parameters
+    :param agent_classes: List of agent classes in string format
+    :param pickled_data: hyperparameters and fitness weights
+    :param headless: Whether to visualize the simulation or not
+    :param generation:
+    :return:
+    """
+    hyperparameters, fitness_weights = pickle.loads(pickled_data)
+    agents = []
+    # Reconstruct agents from snapshot
+    for i in range(len(state_dicts)):
+        agent_class_str = agent_classes[i]
+        # Overhead of moving to GPU is too high so only use CPU
+        if agent_class_str == "RNN":
+            agent = RNNAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))
+        elif agent_class_str == "LSTM":
+            agent = LSTMAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))
+        elif agent_class_str == "GRU":
+            agent = GRUAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))
+        else:
+            raise ValueError(f"Unknown agent class: {agent_class_str}")
+        agent.net.load_state_dict(state_dicts[i])  # Load agent parameters
+        agents.append(agent)
+
+    sim = AgarioSimulation(view_width=900, view_height=600,
+                                             bounds=2000,
+                                             food_count=700,
+                                             virus_count=20)
+    if generation <= 25:
+        # Run without predators
+        return sim.run_training(agents, 0, fps, simulation_duration, headless)
+    else:
+        # Run with predators
+        return sim.run_training(agents, len(agents) // 2, fps, simulation_duration, headless)
 
 
 def main():
@@ -519,9 +485,9 @@ def main():
     parser.add_argument('-b', '--bounds', dest='bounds', type=int, default=1500, help='half-size of world bounds (world is [-b,b] x [-b,b])')
     parser.add_argument('-f', '--food', dest='food', type=int, default=700, help='initial food cell count')
     parser.add_argument('-v', '--viruses', dest='viruses', type=int, default=20, help='initial virus count')
-    parser.add_argument('-sr', '--sras', dest='sras', type=int, default=0, help='number of SRAs')
-    parser.add_argument('-mbr', '--mbras', dest='mbras', type=int, default=20, help='number of MBRA agents')
-    parser.add_argument('-rnn', '--rnns', dest='rnns', type=int, default=0, help='number of RNN agents')
+    parser.add_argument('-sr', '--sras', dest='sras', type=int, default=5, help='number of SRAs')
+    parser.add_argument('-mbr', '--mbras', dest='mbras', type=int, default=5, help='number of MBRA agents')
+    parser.add_argument('-rnn', '--rnns', dest='rnns', type=int, default=5, help='number of RNN agents')
     parser.add_argument('-n', '--nick', dest='nick', type=str, default='Player', help='your nickname')
     parser.add_argument('-oc', '--opencv', dest='opencv', type=bool, default=True, help='Whether to use OpenCV view')
     args = parser.parse_args()
@@ -529,6 +495,20 @@ def main():
     bounds = [args.bounds, args.bounds]
 
     # Load best agent from snapshots file
+    fitness_weights = FitnessWeights(food=0.1, time_alive=100.0, cells_eaten=50.0, score=0.9, death=500.0)
+    '''
+    # RNN agent
+    hyperparameters = Hyperparameters(hidden_layers=[64, 16],
+                                      output_size=4,
+                                      run_interval=0.1,
+                                      param_mutations={"weight": {"strength": 1.0, "chance": 0.05}, "bias": {"strength": 0.25, "chance": 0.025}},
+                                      move_sensitivity=50.0,
+                                      grid_width=9,
+                                      grid_height=6,
+                                      nodes_per_cell=4)
+    base_rnn = RNNAgent.load_best_agent("rnn_agent_snapshots_216i_64h_16h_4o.pkl", hyperparameters, fitness_weights)'''
+
+    # GRU agent
     hyperparameters = Hyperparameters(hidden_layers=[72],
                                       output_size=4,
                                       run_interval=0.1,
@@ -537,21 +517,7 @@ def main():
                                       grid_width=12,
                                       grid_height=8,
                                       nodes_per_cell=3)
-    fitness_weights = FitnessWeights(food=0.1, time_alive=100.0, cells_eaten=50.0, score=0.9, death=500.0)
-    base_rnn = None
-    with open("rnn_snapshots.pkl", "rb") as f:
-        state_dicts, agent_classes = pickle.load(f)
-        if agent_classes[0] == "RNN":
-            base_rnn = RNNAgent(hyperparameters=hyperparameters.copy(), fitness_weights=fitness_weights,
-                                randomize_params=False, device=torch.device("cpu"))
-        elif agent_classes[0] == "LSTM":
-            base_rnn = LSTMAgent(hyperparameters=hyperparameters.copy(), fitness_weights=fitness_weights,
-                                 randomize_params=False, device=torch.device("cpu"))
-        elif agent_classes[0] == "GRU":
-            base_rnn = GRUAgent(hyperparameters=hyperparameters.copy(), fitness_weights=fitness_weights,
-                                randomize_params=False, device=torch.device("cpu"))
-        # Snapshots are saved in order of fitness
-        base_rnn.net.load_state_dict(state_dicts[0])
+    base_rnn = RNNAgent.load_best_agent("gru_agent_snapshots_288i_72h_4o.pkl", hyperparameters, fitness_weights)
 
     # Create model and players
     human_player = Player.make_random(args.nick, bounds)
@@ -563,21 +529,24 @@ def main():
     rnn_agents = []
     for i in range(args.sras):
         sra_agents.append(SimpleReflexAgent(0.1, fitness_weights, 50.0))
-        sra_player = Player.make_random(f"SRA {i}", bounds)
+        sra_player = Player.make_random(f"SRA {i}", bounds, color=(255, 0, 0))
         sra_players.append(sra_player)
     for i in range(args.mbras):
         mbra_agents.append(ModelBasedReflexAgent(0.1, fitness_weights, 50.0))
-        mbra_player = Player.make_random(f"SRA {i}", bounds)
+        mbra_player = Player.make_random(f"SRA {i}", bounds, color=(255, 50, 120))
         mbra_players.append(mbra_player)
     for i in range(args.rnns):
         rnn_agents.append(base_rnn.copy())
-        rnn_player = Player.make_random(f"RNN {i}", bounds)
+        rnn_player = Player.make_random(f"RNN {i}", bounds, color=(0, 255, 0))
         rnn_players.append(rnn_player)
 
     players = [human_player] + sra_players + mbra_players + rnn_players
     model = Model(players, bounds=bounds, chunk_size=args.bounds // 10)
     model.spawn_cells(args.food)
     model.spawn_viruses(args.viruses)
+
+    print("In spectate mode, use the arrow keys to cycle through the player cells")
+    print("In playing mode, use WASD to move, space to split, and w to eject")
 
     if args.opencv:
         view = OCView(args.width, args.height, model, human_player)
@@ -633,6 +602,7 @@ def main():
             frame += 1
             time.sleep(0.01)
     else:
+        # Need to implement pygame viewing still
         pygame.init()
         screen = pygame.display.set_mode((args.width, args.height))
         pygame.display.set_caption('Agar.io Offline')

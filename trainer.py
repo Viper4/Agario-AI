@@ -10,50 +10,6 @@ from multiprocessing import Pool
 from tqdm import tqdm
 
 
-# Function needs to be picklable so keep it out of classes
-def run_simulation_worker(fps: int, simulation_duration: float, state_dicts: list[dict], agent_classes: list[str],
-                          pickled_data: bytes, headless: bool, generation: int):
-    """
-    Function intended for parallel processing which reconstructs agents and runs a simulation with them.
-    Returns final fitness of all the agents in this simulation.
-    :param fps: "Normal" frames per second for simulation. Basically, defines how fast a normal game runs for humans.
-    :param simulation_duration: Duration of simulation in seconds
-    :param state_dicts: List of parameters
-    :param agent_classes: List of agent classes in string format
-    :param pickled_data: hyperparameters and fitness weights
-    :param headless: Whether to visualize the simulation or not
-    :param generation:
-    :return:
-    """
-    hyperparameters, fitness_weights = pickle.loads(pickled_data)
-    agents = []
-    # Reconstruct agents from snapshot
-    for i in range(len(state_dicts)):
-        agent_class_str = agent_classes[i]
-        # Overhead of moving to GPU is too high so only use CPU
-        if agent_class_str == "RNN":
-            agent = RNNAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))
-        elif agent_class_str == "LSTM":
-            agent = LSTMAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))
-        elif agent_class_str == "GRU":
-            agent = GRUAgent(hyperparameters, fitness_weights, False, torch.device("cpu"))
-        else:
-            raise ValueError(f"Unknown agent class: {agent_class_str}")
-        agent.net.load_state_dict(state_dicts[i])  # Load agent parameters
-        agents.append(agent)
-
-    sim = agario_simulation.AgarioSimulation(view_width=900, view_height=600,
-                                             bounds=2000,
-                                             food_count=700,
-                                             virus_count=20)
-    if generation <= 25:
-        # Run without predators
-        return sim.run(agents, 0, fps, simulation_duration, headless)
-    else:
-        # Run with predators
-        return sim.run(agents, len(agents) // 2, fps, simulation_duration, headless)
-
-
 class GeneticTrainer:
     def __init__(self, init_rnn_prop: float, init_lstm_prop: float, init_gru_prop: float, population_size: int,
                  hyperparameters: Hyperparameters, fitness_weights: FitnessWeights, save_file: str,
@@ -195,16 +151,14 @@ class GeneticTrainer:
             parent2 = random.randint(0, self.population_size // 2)  # Keep trying until we get a match
         return parent1, parent2
 
-    def train(self, load_from_file: bool, num_simulations: int, headless: bool):
+    def train(self, num_simulations: int, headless: bool):
         """
         Starts the training loop
-        :param load_from_file: Whether to load the population from file.
         :param num_simulations: Number of simulations to run per generation.
         :param headless: Whether to run the simulation(s) headless.
         :return: Final population
         """
         generation = 0
-        self.init_agents(load_from_file)
 
         while self.max_generations is None or generation < self.max_generations:
             state_dicts = []
@@ -231,7 +185,7 @@ class GeneticTrainer:
                 # Run simulations in parallel, one worker per simulation
                 for i in range(num_simulations):
                     jobs.append(pool.apply_async(
-                        run_simulation_worker,
+                        agario_simulation.run_simulation_worker,
                         args=(60, 300, state_dicts, agent_classes, pickled_data, headless, generation,)
                     ))
 
@@ -323,10 +277,11 @@ class GeneticTrainer:
                         parent1 = self.tournament_selection(rnn_reproduce_pool)
                         parent2 = self.tournament_selection(rnn_reproduce_pool)
                         num_rnns += 1
-                    elif num_rnns < max(1, len(rnn_indices) - 1):  # Shrink offspring by 1 but maintain at least 1 child
+                    elif len(rnn_indices) > 0:
+                        # Protect against early extinction and force reproduce
                         self.extinction_counters["RNN"] += 1
-                        if self.extinction_counters["RNN"] < self.extinction_threshold:
-                            # Protect against early extinction and force reproduce
+                        # Shrink offspring by 1 but maintain at least 1 child
+                        if num_rnns < max(1, len(rnn_indices) - 1) and self.extinction_counters["RNN"] < self.extinction_threshold:
                             parent1 = self.tournament_selection(rnn_indices)
                             parent2 = self.tournament_selection(rnn_indices)
                             num_rnns += 1
@@ -336,10 +291,11 @@ class GeneticTrainer:
                         parent1 = self.tournament_selection(lstm_reproduce_pool)
                         parent2 = self.tournament_selection(lstm_reproduce_pool)
                         num_lstms += 1
-                    elif num_lstms < max(1, len(lstm_indices) - 1):  # Shrink offspring by 1 but maintain at least 1 child
+                    elif len(lstm_indices) > 0:
+                        # Protect against early extinction and force reproduce
                         self.extinction_counters["LSTM"] += 1
-                        if self.extinction_counters["LSTM"] < self.extinction_threshold:
-                            # Protect against early extinction and force reproduce
+                        # Shrink offspring by 1 but maintain at least 1 child
+                        if num_lstms < max(1, len(lstm_indices) - 1) and self.extinction_counters["LSTM"] < self.extinction_threshold:
                             parent1 = self.tournament_selection(lstm_indices)
                             parent2 = self.tournament_selection(lstm_indices)
                             num_lstms += 1
@@ -349,10 +305,11 @@ class GeneticTrainer:
                         parent1 = self.tournament_selection(gru_reproduce_pool)
                         parent2 = self.tournament_selection(gru_reproduce_pool)
                         num_grus += 1
-                    elif num_grus < max(1, len(gru_indices) - 1):  # Shrink offspring by 1 but maintain at least 1 child
+                    elif len(gru_indices) > 0:
+                        # Protect against early extinction and force reproduce
                         self.extinction_counters["GRU"] += 1
-                        if self.extinction_counters["GRU"] < self.extinction_threshold:
-                            # Protect against early extinction and force reproduce
+                        # Shrink offspring by 1 but maintain at least 1 child
+                        if num_grus < max(1, len(gru_indices) - 1) and self.extinction_counters["GRU"] < self.extinction_threshold:
                             parent1 = self.tournament_selection(gru_indices)
                             parent2 = self.tournament_selection(gru_indices)
                             num_grus += 1
@@ -414,4 +371,8 @@ if __name__ == "__main__":
                              fitness_weights=fitness_weights,
                              save_file="agent_snapshots.pkl",
                              extinction_threshold=5)
-    trainer.train(load_from_file=True, num_simulations=5, headless=True)
+
+    #best_agent = RNNAgent.load_best_agent("gru_agent_snapshots_288i_72h_4o.pkl", hyperparameters, fitness_weights)
+    trainer.init_agents(load_from_file=True)
+    #trainer.population[0] = best_agent
+    trainer.train(num_simulations=5, headless=True)
