@@ -350,6 +350,8 @@ class MemoryItem:
         """
         ticks_elapsed = current_tick - self.timestamp
         if ticks_elapsed > 0:
+             # Limit max decay ticks to avoid floating point precision issues
+            ticks_elapsed = min(ticks_elapsed, 500)
             self.priority = self.initial_priority * (decay_factor ** ticks_elapsed)
 
     def update(self, pos: tuple[float, float], priority: float, timestamp: int, 
@@ -385,7 +387,7 @@ class MemoryBuffer:
     Manages memory items for different object types with priority decay.
     """
     def __init__(self, decay_factor: float = 0.92, priority_threshold: float = 0.1, 
-                 max_size_per_type: int = 100, distance_weight_factor: float = 500.0):
+                 max_size_per_type: int = 50, distance_weight_factor: float = 500.0):
         self.decay_factor = decay_factor
         self.priority_threshold = priority_threshold
         self.max_size_per_type = max_size_per_type
@@ -496,11 +498,30 @@ class MemoryBuffer:
                             my_pos: tuple[float, float], include_area: bool = False):
         """Helper method to merge memory items with current visible objects."""
         merged = list(current_objects)
-        current_positions = [(pos[0], pos[1]) if isinstance(pos, tuple) and len(pos) >= 2 
-                            else pos for pos in current_objects]
+        # Use set for O(1) lookup instead of O(n*m) complexity
+        grid_size = 50.0
+        current_positions_set = set()
+        for pos in current_objects:
+            if isinstance(pos, tuple) and len(pos) >= 2:
+                grid_x = int(pos[0] / grid_size)
+                grid_y = int(pos[1] / grid_size)
+                current_positions_set.add((grid_x, grid_y))
         
         for item in memory_items:
-            if not any(self._is_same_position(item.pos, pos, 50.0) for pos in current_positions):
+          grid_x = int(item.pos[0] / grid_size)
+          grid_y = int(item.pos[1] / grid_size)
+            
+          # Check this grid cell and neighbors for duplicates
+          is_duplicate = False
+          for dx in range(-1, 2):
+                for dy in range(-1, 2):
+                    if (grid_x + dx, grid_y + dy) in current_positions_set:
+                        is_duplicate = True
+                        break
+                if is_duplicate:
+                    break
+            
+            if not is_duplicate:
                 distance = math.sqrt(item.distance_to(my_pos))
                 adjusted_priority = item.priority / (1.0 + distance / self.distance_weight_factor)
                 if adjusted_priority >= self.priority_threshold:
@@ -783,4 +804,5 @@ class ModelBasedReflexAgent(BaseAgent):
             time.sleep(self.run_interval)
 
         return None
+
 
