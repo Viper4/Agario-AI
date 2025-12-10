@@ -23,7 +23,7 @@ def run_simulation_worker(fps: int, simulation_duration: float, agent_snapshots:
                                              bounds=2000,
                                              food_count=700,
                                              virus_count=20)
-    return sim.run(rnn_agents, len(rnn_agents) // 5, fps, simulation_duration, headless)
+    return sim.run(rnn_agents, len(rnn_agents) // 2, fps, simulation_duration, headless)
 
 
 class GeneticTrainer:
@@ -75,32 +75,6 @@ class GeneticTrainer:
                              randomize_params=False, device=torch.device("cpu"))
 
             # Crossover from both parents
-
-            '''
-            # Two-point crossover
-            # Flatten all parameters into single vectors
-            p1 = torch.cat([p.data.view(-1) for p in parent1.rnn.parameters()])
-            p2 = torch.cat([p.data.view(-1) for p in parent2.rnn.parameters()])
-
-            num_params = p1.numel()
-
-            # Choose crossover points
-            start = random.randint(0, num_params - 2)
-            end = random.randint(start + 1, num_params - 1)
-
-            # Perform crossover
-            child_vector = torch.empty_like(p1)
-            child_vector[:start] = p1[:start]
-            child_vector[start:end] = p2[start:end]
-            child_vector[end:] = p1[end:]
-
-            # Load child vector back into child model parameters
-            idx = 0
-            for param_child in child.rnn.parameters():
-                num = param_child.data.numel()
-                param_child.data.copy_(child_vector[idx:idx + num].view(param_child.data.shape))
-                idx += num'''
-
             # Random crossover 50% chance for either parent at every parameter
             for (param1, param2, param_child) in zip(
                         parent1.rnn.parameters(),
@@ -116,6 +90,17 @@ class GeneticTrainer:
             child.update_sigma(factor=0.95, base_param_mutations=self.hyperparameters.param_mutations)
             children.append(child)
         return children
+
+    def tournament_selection(self, num_parents, k=3):
+        """
+        Returns index of best parent from random sample of k agents from the population[:num_parents]
+        :param num_parents: Total parents to select from
+        :param k: Number of candidates in the tournament
+        :return: Index of best parent from the tournament
+        """
+        candidates = random.sample(range(num_parents), k)
+        best = max(candidates, key=lambda i: self.population[i].avg_fitness)
+        return best
 
     def train(self, load_from_file: bool, num_simulations: int):
         """
@@ -142,7 +127,7 @@ class GeneticTrainer:
                 for i in range(num_simulations):
                     jobs.append(pool.apply_async(
                         run_simulation_worker,
-                        args=(60, 240, agent_snapshots, pickled_data, True,)
+                        args=(60, 300, agent_snapshots, pickled_data, True,)
                     ))
 
                 pool.close()  # no more tasks
@@ -182,8 +167,18 @@ class GeneticTrainer:
             for i in range(num_elites):
                 new_population.append(self.population[i])
 
+            # Tournament selection
+            for i in range(num_parents):
+                # Tournament selection
+                parent1 = self.tournament_selection(num_parents)
+                parent2 = self.tournament_selection(num_parents)
+                children = self.reproduce(self.population[parent1], self.population[parent2], 1)
+                new_population.extend(children)
+                child_counts[parent1] += 1
+                child_counts[parent2] += 1
+
             # Pair mating
-            for i in range(0, num_parents, 2):
+            '''for i in range(0, num_parents, 2):
                 if i+1 >= self.population_size:
                     break
                 # Reproduce in pairs: 0: (0,1), 1: (2,3),..., floor(n/4): (floor(n/2)-1,floor(n/2))
@@ -196,7 +191,7 @@ class GeneticTrainer:
                 children = self.reproduce(parent1, parent2, round(a-b*i + a-b*(i+1)))
                 child_counts[i] = len(children)
                 child_counts[i + 1] = len(children)
-                new_population.extend(children)
+                new_population.extend(children)'''
 
             diff = self.population_size - len(new_population)
             if diff < 0:  # Too many children
@@ -238,20 +233,19 @@ class GeneticTrainer:
 
 
 if __name__ == "__main__":
-    # Max number of objects on screen at a time reaches ~50 so define fixed input of 32 objects with 8 nodes per object
-    grid_weight = 9
+    grid_width = 9
     grid_height = 6
     nodes_per_cell = 4
-    num_inputs = grid_weight * grid_height * nodes_per_cell
+    num_inputs = grid_width * grid_height * nodes_per_cell
     hyperparameters = Hyperparameters(hidden_layers=[64, 16],
                                       output_size=4,
                                       run_interval=0.1,
-                                      param_mutations={"weight": 2.0, "bias": 0.5},
+                                      param_mutations={"weight": {"strength": 2.0, "chance": 0.05}, "bias": {"strength": 0.5, "chance": 0.025}},
                                       move_sensitivity=50.0,
-                                      grid_width=9,
-                                      grid_height=6,
-                                      nodes_per_cell=4)
-    fitness_weights = FitnessWeights(food=0.1, time_alive=100.0, cells_eaten=10.0, score=0.9, death=0.0)
+                                      grid_width=grid_width,
+                                      grid_height=grid_height,
+                                      nodes_per_cell=nodes_per_cell)
+    fitness_weights = FitnessWeights(food=0.1, time_alive=100.0, cells_eaten=10.0, score=0.9, death=500.0)
 
     trainer = GeneticTrainer(population_size=int(input("Enter population size> ")),
                              hyperparameters=hyperparameters,

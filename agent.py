@@ -4,6 +4,7 @@ import geometry_utils
 import random
 import math
 import torch
+import copy
 from image_processing import ImageProcessing
 from web_scraper import WebScraper
 
@@ -29,7 +30,7 @@ class Hyperparameters:
             hidden_layers=self.hidden_layers.copy(),
             output_size=self.output_size,
             run_interval=self.run_interval,
-            param_mutations=self.param_mutations.copy(),
+            param_mutations=copy.deepcopy(self.param_mutations),
             move_sensitivity=self.move_sensitivity,
             grid_width=self.grid_width,
             grid_height=self.grid_height,
@@ -205,7 +206,7 @@ class RNNAgent(BaseAgent):
                 # Find the mutation hyperparam associated with this parameter
                 for key, value in hyperparameters.param_mutations.items():
                     if key in name:
-                        sigma = value
+                        sigma = value["strength"]
                         break
 
                 noise = torch.randn_like(param) * sigma  # Gaussian noise
@@ -227,13 +228,13 @@ class RNNAgent(BaseAgent):
         Reduce the standard deviation of mutation as the agent becomes more fit.
         Resets mutation standard deviation to original if it goes below epsilon.
         :param factor: factor to reduce standard deviation by
-        :param base_param_mutations: the original mutation standard deviations
+        :param base_param_mutations: the original mutation settings
         """
         for mutation in self.hyperparameters.param_mutations:
-            if self.hyperparameters.param_mutations[mutation] < self.epsilon:
-                self.hyperparameters.param_mutations[mutation] = base_param_mutations[mutation]
+            if self.hyperparameters.param_mutations[mutation]["strength"] < self.epsilon:
+                self.hyperparameters.param_mutations[mutation]["strength"] = base_param_mutations[mutation]["strength"]
             else:
-                self.hyperparameters.param_mutations[mutation] *= factor
+                self.hyperparameters.param_mutations[mutation]["strength"] *= factor
 
     def mutate(self):
         """
@@ -241,14 +242,17 @@ class RNNAgent(BaseAgent):
         """
         for name, param in list(self.rnn.named_parameters()):
             sigma = 0
+            chance = 0
             # Find the mutation hyperparam associated with this parameter
             for key, value in self.hyperparameters.param_mutations.items():
                 if key in name:
-                    sigma = value
+                    sigma = value["strength"]
+                    chance = value["chance"]
                     break
 
-            noise = torch.randn_like(param) * sigma  # Gaussian noise
-            param.data.add_(noise)
+            if random.random() < chance:
+                noise = torch.randn_like(param) * sigma  # Gaussian noise
+                param.data.add_(noise)
 
     def init_grid(self):
         """
@@ -340,10 +344,10 @@ class MemoryItem:
     """
     def __init__(self, obj_type: str, pos: tuple[float, float], priority: float, 
                  timestamp: int, area: float = 0.0, radius: float = 0.0):
-        self.obj_type = obj_type
+        self.obj_type = obj_type  # Food, player, virus
         self.pos = pos
-        self.priority = priority
-        self.timestamp = timestamp
+        self.priority = priority  # Priority of this item
+        self.timestamp = timestamp  # Tick that this item was added
         self.area = area
         self.radius = radius
         self.initial_priority = priority
@@ -541,34 +545,26 @@ class MemoryBuffer:
         return (dx * dx + dy * dy) < (threshold * threshold)
 
 
-class ModelBasedReflexAgent(BaseAgent):
+class SimpleReflexAgent(BaseAgent):
     """
-    Model-based reflex agent using rule-based decision making instead of neural networks.
+    Simple reflex agent using rule-based decision-making instead of neural networks.
     """
 
     VIRUS_DANGER_SIZE = 300.0
-    THREAT_SIZE_RATIO = 1.1
+    THREAT_SIZE_RATIO = 1.17
     PREY_SIZE_RATIO = 0.83
     SPLIT_DISTANCE_THRESHOLD = 350.0
     VIRUS_AVOID_DISTANCE = 100.0
 
-    def __init__(self, run_interval: float, fitness_weights: FitnessWeights, move_sensitivity: float = 50.0,
-                 decay_factor: float = 0.92, priority_threshold: float = 0.1,
-                 max_memory_size: int = 100, distance_weight_factor: float = 500.0):
+    def __init__(self, run_interval: float, fitness_weights: FitnessWeights, move_sensitivity: float = 50.0):
         super().__init__(run_interval, fitness_weights)
         self.move_sensitivity = move_sensitivity
         self.my_area = 0.0
         self.last_action = (0.0, 0.0, 0.0, 0.0)
-        self.memory_buffer = MemoryBuffer(decay_factor=decay_factor,
-                                          priority_threshold=priority_threshold,
-                                          max_size_per_type=max_memory_size,
-                                          distance_weight_factor=distance_weight_factor)
-        self.current_tick = 0
 
-    def get_action(self, threats: list, prey: list, foods: list, viruses: list, my_pos: tuple[float, float],
-                   min_area: float, max_area: float, my_radius: float, current_tick: int = None):
+    def get_action(self, threats: list, prey: list, foods: list, viruses: list, my_pos: tuple[float, float], min_area: float, max_area: float, my_radius: float):
         """
-        Rule-based decision logic with memory buffer integration.
+        Rule-based decision logic.
         :param threats: List of visible threats
         :param prey: List of visible prey
         :param foods: List of visible foods
@@ -576,54 +572,52 @@ class ModelBasedReflexAgent(BaseAgent):
         :param my_pos: Current position of the agent
         :param min_area: Min area of parts of this player
         :param max_area: Max area of parts of this player
-        :param my_radius: Maximum radius of player parts
-        :param current_tick: Current simulation tick (optional, uses internal counter if None)
-        :return: tuple of (target_pos, split, eject)
+        :return: tuple of (move_x, move_y, split, eject)
         """
         self.my_area = max_area
-        self.current_tick = current_tick if current_tick is not None else self.current_tick + 1
-
-        self.memory_buffer.update_with_visible_objects(threats, prey, foods, viruses, self.current_tick)
-        self.memory_buffer.decay_all(self.current_tick)
-        merged_threats, merged_prey, merged_foods, merged_viruses = self.memory_buffer.get_merged_objects(my_pos, threats, prey, foods, viruses)
 
         target_pos = [my_pos[0], my_pos[1]]
         split, eject = 0.0, 0.0
 
-        split_threshold_sqr = self.SPLIT_DISTANCE_THRESHOLD * self.SPLIT_DISTANCE_THRESHOLD
+        # Rule 1: Flee from threats (highest priority)
         running = False
-
-        if merged_threats:
-            closest_threat = min(merged_threats,
-                                 key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+        if threats:
+            closest_threat = min(threats, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
             threat_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_threat[0], closest_threat[1])
-            if threat_dist < split_threshold_sqr:
-                dx, dy = my_pos[0] - closest_threat[0], my_pos[1] - closest_threat[1]
-                urgency = split_threshold_sqr - threat_dist
+            if threat_dist < self.SPLIT_DISTANCE_THRESHOLD * self.SPLIT_DISTANCE_THRESHOLD:
+                # Calculate direction away from threat
+                dx = my_pos[0] - closest_threat[0]
+                dy = my_pos[1] - closest_threat[1]
+                urgency = self.SPLIT_DISTANCE_THRESHOLD * self.SPLIT_DISTANCE_THRESHOLD - threat_dist
                 target_pos[0] = my_pos[0] + dx * urgency
                 target_pos[1] = my_pos[1] + dy * urgency
                 running = True
 
+        # Rule 2: Chase prey
         if not running:
-            if merged_prey:
-                closest_prey = min(merged_prey,
-                                   key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+            if prey:
+                closest_prey = min(prey, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
                 prey_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_prey[0], closest_prey[1])
-                target_pos[0], target_pos[1] = closest_prey[0], closest_prey[1]
+                target_pos[0] = closest_prey[0]
+                target_pos[1] = closest_prey[1]
 
-                attack_threshold = (self.SPLIT_DISTANCE_THRESHOLD + my_radius) ** 2
-                if prey_dist < attack_threshold and len(closest_prey) >= 3:
-                    if min_area * 0.5 * self.PREY_SIZE_RATIO > closest_prey[2]:
+                # Split attack if close enough and can eat after split
+                threshold = self.SPLIT_DISTANCE_THRESHOLD + my_radius
+                if prey_dist < threshold * threshold:
+                    half_my_area = min_area * 0.5
+                    if half_my_area * self.PREY_SIZE_RATIO > closest_prey[2]:
                         split = 1.0
-            elif merged_foods:
-                closest_food = min(merged_foods,
-                                   key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
-                target_pos[0], target_pos[1] = closest_food[0], closest_food[1]
+            # Rule 3: Eat food
+            elif foods:
+                closest_food = min(foods, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+                target_pos[0] = closest_food[0]
+                target_pos[1] = closest_food[1]
 
-        if merged_viruses and self.my_area > self.VIRUS_DANGER_SIZE:
-            avoid_dst_sqr = self.VIRUS_AVOID_DISTANCE * self.VIRUS_AVOID_DISTANCE
-            for virus in merged_viruses:
+        # Virus avoidance (when large enough)
+        if viruses and self.my_area > self.VIRUS_DANGER_SIZE:
+            for virus in viruses:
                 virus_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], virus[0], virus[1])
+                avoid_dst_sqr = self.VIRUS_AVOID_DISTANCE * self.VIRUS_AVOID_DISTANCE
                 if virus_dist < avoid_dst_sqr:
                     avoid_strength = (avoid_dst_sqr - virus_dist) / avoid_dst_sqr
                     dx = virus[0] - my_pos[0]
@@ -647,6 +641,7 @@ class ModelBasedReflexAgent(BaseAgent):
                 self.alive = True
                 objects = self.get_web_game_data(visualize=visualize)
 
+                # Estimate own size from nearby player objects
                 estimated_area = 400.0
                 for obj in objects:
                     if obj.label == "player" and abs(obj.pos.x) < 0.1 and abs(obj.pos.y) < 0.1:
@@ -664,7 +659,7 @@ class ModelBasedReflexAgent(BaseAgent):
                     self.scraper.press_w()
             else:
                 if self.alive:
-                    print("ModelBasedReflexAgent died. Calculating fitness...")
+                    print("SimpleReflexAgent died. Calculating fitness...")
                     stats = self.scraper.get_stats(wait=True)
 
                     if stats is None:
@@ -686,13 +681,13 @@ class ModelBasedReflexAgent(BaseAgent):
         return None
 
 
-class SimpleReflexAgent(BaseAgent):
+class ModelBasedReflexAgent(BaseAgent):
     """
     Simple reflex agent using rule-based decision-making instead of neural networks.
     """
 
     VIRUS_DANGER_SIZE = 300.0
-    THREAT_SIZE_RATIO = 1.1
+    THREAT_SIZE_RATIO = 1.17
     PREY_SIZE_RATIO = 0.83
     SPLIT_DISTANCE_THRESHOLD = 350.0
     VIRUS_AVOID_DISTANCE = 100.0

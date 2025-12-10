@@ -103,7 +103,7 @@ class Model:
         """
         return list(self._overlap_chunks(cell))
 
-    def get_chunks(self, bounds: tuple[tuple[int, int], tuple[int, int]]):
+    def get_chunks(self, bounds: tuple[tuple[float, float], tuple[float, float]]):
         """
         Yield all chunks that overlap the given bounds.
         :param bounds: (top_left, bottom_right)

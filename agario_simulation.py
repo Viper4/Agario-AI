@@ -22,7 +22,7 @@ class AgarioSimulation:
     @staticmethod
     def sra_tick(view_width: int, view_height: int, agent: SimpleReflexAgent, player: Player, model: Model):
         """
-        Runs a single tick of the simulation for the given sra agent.
+        Runs a single tick of the simulation for the given SRA.
         :param view_width: Width of the view
         :param view_height: Height of the view
         :param agent: ModelBasedReflexAgent to make actions with during simulation
@@ -63,7 +63,7 @@ class AgarioSimulation:
                     viruses.append((virus.pos[0], virus.pos[1]))
             for playercell in chunk.playercells:
                 if playercell.parent is player:
-                    continue
+                    continue  # Skip own cells
                 if playercell.within_bounds(view_bounds):
                     player_area = playercell.area()
                     if player_area > max_area * agent.THREAT_SIZE_RATIO:
@@ -118,7 +118,7 @@ class AgarioSimulation:
                     viruses.append((virus.pos[0], virus.pos[1]))
             for playercell in chunk.playercells:
                 if playercell.parent is player:
-                    continue
+                    continue  # Skip own cells
                 if playercell.within_bounds(view_bounds):
                     player_area = playercell.area()
                     if player_area > max_area * agent.THREAT_SIZE_RATIO:
@@ -129,34 +129,27 @@ class AgarioSimulation:
         return agent.get_action(threats, prey, foods, viruses, center_pos, min_area, max_area, max_radius, simulation_tick)
 
     @staticmethod
-    def rnn_tick(view_width: int, view_height: int, agent: RNNAgent, player: Player, model: Model):
+    def generate_vision_grid_v1(agent: RNNAgent, center_pos: tuple[float, float], model: Model, view_bounds: tuple[tuple[float, float], tuple[float, float]]):
         """
-        Runs a single tick of the simulation for the given RNN agent.
-        :param view_width: Width of the view
-        :param view_height: Height of the view
-        :param agent: RNNAgent to make actions with during simulation
-        :param player: Player to make actions for
+        Generates a vision grid where each grid cell is (food_count, virus_count, playercell_count, area).
+        Each node value is normalized by the maximum value of that type in the entire grid.
+        :param agent: RNNAgent to generate the vision grid for
+        :param center_pos: Center position of the view
         :param model: Model to use for simulation
-        :return: The agent's (target_pos, split, eject)
+        :param view_bounds: Bounds of the view
+        :return: torch.Tensor of shape (grid_width, grid_height, nodes_per_cell)
         """
-        # Expand view bounds based on player's score
-        center_pos = player.center()
-        score = player.score()
-        inv_scale = OCCamera.get_inverse_scale(score)
-
-        scaled_width = view_width * inv_scale
-        scaled_height = view_height * inv_scale
-        half_view_width = scaled_width * 0.5
-        half_view_height = scaled_height * 0.5
-        # Bounds is top left corner and bottom right corner
-        view_bounds = ((center_pos[0] - half_view_width, center_pos[1] + half_view_height),
-                       (center_pos[0] + half_view_width, center_pos[1] - half_view_height))
-
         vision_grid = agent.init_grid()
         max_food = 0
         max_virus = 0
         max_player = 0
         max_area = 0.0
+
+        # view_bounds = (top left, bottom right)
+        view_width = view_bounds[1][0] - view_bounds[0][0]
+        view_height = view_bounds[0][1] - view_bounds[1][1]
+        half_view_width = view_width * 0.5
+        half_view_height = view_height * 0.5
 
         for chunk in model.get_chunks(view_bounds):
             for cell in chunk.cells:
@@ -215,6 +208,103 @@ class AgarioSimulation:
             dtype=vision_grid.dtype
         )
         vision_grid.nan_to_num_(nan=0.0)  # NaN values come from divisions by 0 (when max values are 0)
+        return vision_grid
+
+    @staticmethod
+    def generate_vision_grid_v2(agent: RNNAgent, center_pos: tuple[float, float], model: Model,
+                                view_bounds: tuple[tuple[float, float], tuple[float, float]]):
+        """
+        Generates a vision grid where each grid cell is (food_area, virus_area, player_area).
+        Each node value is normalized by the maximum value of that type in the entire grid.
+        :param agent: RNNAgent to generate the vision grid for
+        :param center_pos: Center position of the view
+        :param model: Model to use for simulation
+        :param view_bounds: Bounds of the view
+        :return: torch.Tensor of shape (grid_width, grid_height, nodes_per_cell)
+        """
+        vision_grid = agent.init_grid()
+        max_food_area = 0.0
+        max_virus_area = 0.0
+        max_player_area = 0.0
+
+        # view_bounds = (top left, bottom right)
+        view_width = view_bounds[1][0] - view_bounds[0][0]
+        view_height = view_bounds[0][1] - view_bounds[1][1]
+        half_view_width = view_width * 0.5
+        half_view_height = view_height * 0.5
+
+        for chunk in model.get_chunks(view_bounds):
+            for cell in chunk.cells:
+                if cell.within_bounds(view_bounds):
+                    # Normalize global position to relative position in the view bounds from [-1, 1]
+                    normalized_pos = ((cell.pos[0] - center_pos[0]) / half_view_width,
+                                      (cell.pos[1] - center_pos[1]) / half_view_height)
+
+                    gx, gy = agent.get_grid_index(normalized_pos)
+                    grid_cell = vision_grid[gx, gy]
+                    grid_cell[0] += cell.area()  # Food area
+
+                    if grid_cell[0] > max_food_area:
+                        max_food_area = grid_cell[0]
+            for virus in chunk.viruses:
+                if virus.within_bounds(view_bounds):
+                    # Normalize global position to relative position in the view bounds from [-1, 1]
+                    normalized_pos = ((virus.pos[0] - center_pos[0]) / half_view_width,
+                                      (virus.pos[1] - center_pos[1]) / half_view_height)
+
+                    gx, gy = agent.get_grid_index(normalized_pos)
+                    grid_cell = vision_grid[gx, gy]
+                    grid_cell[1] += virus.area()
+
+                    if grid_cell[1] > max_virus_area:
+                        max_virus_area = grid_cell[1]
+            for playercell in chunk.playercells:
+                if playercell.within_bounds(view_bounds):
+                    # Normalize global position to relative position in the view bounds from [-1, 1]
+                    normalized_pos = ((playercell.pos[0] - center_pos[0]) / half_view_width,
+                                      (playercell.pos[1] - center_pos[1]) / half_view_height)
+
+                    gx, gy = agent.get_grid_index(normalized_pos)
+                    grid_cell = vision_grid[gx, gy]
+                    grid_cell[2] += playercell.area()
+
+                    if grid_cell[2] > max_player_area:
+                        max_player_area = grid_cell[2]
+
+        # Normalize nodes in grid using vectorized division
+        vision_grid /= torch.tensor(
+            [max_food_area, max_virus_area, max_player_area],
+            device=vision_grid.device,
+            dtype=vision_grid.dtype
+        )
+        vision_grid.nan_to_num_(nan=0.0)  # NaN values come from divisions by 0 (when max values are 0)
+        return vision_grid
+
+    @staticmethod
+    def rnn_tick(view_width: int, view_height: int, agent: RNNAgent, player: Player, model: Model):
+        """
+        Runs a single tick of the simulation for the given RNN agent.
+        :param view_width: Width of the view
+        :param view_height: Height of the view
+        :param agent: RNNAgent to make actions with during simulation
+        :param player: Player to make actions for
+        :param model: Model to use for simulation
+        :return: The agent's (target_pos, split, eject)
+        """
+        # Expand view bounds based on player's score
+        center_pos = player.center()
+        score = player.score()
+        inv_scale = OCCamera.get_inverse_scale(score)
+
+        scaled_width = view_width * inv_scale
+        scaled_height = view_height * inv_scale
+        half_view_width = scaled_width * 0.5
+        half_view_height = scaled_height * 0.5
+        # Bounds is top left corner and bottom right corner
+        view_bounds = ((center_pos[0] - half_view_width, center_pos[1] + half_view_height),
+                       (center_pos[0] + half_view_width, center_pos[1] - half_view_height))
+
+        vision_grid = AgarioSimulation.generate_vision_grid_v1(agent, center_pos, model, view_bounds)
 
         move_x, move_y, split, eject = agent.get_action(vision_grid)
 
@@ -225,10 +315,10 @@ class AgarioSimulation:
 
     def run(self, agents: list[RNNAgent], num_sra: int, base_fps: int, simulation_duration: float, headless: bool):
         """
-        Run a simulation with the RNN agents and a number of sra agents.
+        Run a simulation with the RNN agents and a number of SRAs.
         Stops when the duration is reached or when only 1 agent is alive.
         :param agents: List of RNN agents to spawn
-        :param num_sra: Number of sra agents to spawn
+        :param num_sra: Number of SRAs to spawn
         :param base_fps: Frames per second for a game at normal speed.
         :param simulation_duration: How long the simulation runs in seconds. Doesn't mean termination will occur at this time.
         :param headless: Whether to draw the game's visuals.
@@ -336,7 +426,7 @@ class AgarioSimulation:
             if sra_players[i].alive:
                 sras_alive += 1
 
-        print(f"Simulation complete after {time.time() - start_time:.2f} seconds with {rnn_agents_alive} RNN agents alive and {sras_alive} sra agents alive")
+        print(f"Simulation complete after {time.time() - start_time:.2f} seconds with {rnn_agents_alive} RNN agents alive and {sras_alive} SRAs alive")
         return fitnesses
     
     def run_mbra(self, agent: ModelBasedReflexAgent, base_fps: int, simulation_duration: float, headless: bool):
@@ -428,7 +518,7 @@ def main():
     parser.add_argument('-b', '--bounds', dest='bounds', type=int, default=1500, help='half-size of world bounds (world is [-b,b] x [-b,b])')
     parser.add_argument('-f', '--food', dest='food', type=int, default=700, help='initial food cell count')
     parser.add_argument('-v', '--viruses', dest='viruses', type=int, default=20, help='initial virus count')
-    parser.add_argument('-sr', '--sras', dest='sras', type=int, default=0, help='number of SRA agents')
+    parser.add_argument('-sr', '--sras', dest='sras', type=int, default=0, help='number of SRAs')
     parser.add_argument('-mbr', '--mbras', dest='mbras', type=int, default=20, help='number of MBRA agents')
     parser.add_argument('-rnn', '--rnns', dest='rnns', type=int, default=0, help='number of RNN agents')
     parser.add_argument('-n', '--nick', dest='nick', type=str, default='Player', help='your nickname')
@@ -441,12 +531,12 @@ def main():
     hyperparameters = Hyperparameters(hidden_layers=[64, 16],
                                       output_size=4,
                                       run_interval=0.1,
-                                      param_mutations={"weight": 2.0, "bias": 0.5},
+                                      param_mutations={"weight": {"strength": 2.0, "chance": 0.05}, "bias": {"strength": 0.5, "chance": 0.025}},
                                       move_sensitivity=50.0,
                                       grid_width=9,
                                       grid_height=6,
                                       nodes_per_cell=4)
-    fitness_weights = FitnessWeights(food=0.5, time_alive=100.0, cells_eaten=50.0, score=0.75, death=500.0)
+    fitness_weights = FitnessWeights(food=0.1, time_alive=100.0, cells_eaten=50.0, score=0.9, death=500.0)
     base_rnn = RNNAgent(hyperparameters=hyperparameters.copy(), fitness_weights=fitness_weights,
                         randomize_params=False, device=torch.device("cpu"))
     with open("agent_snapshots.pkl", "rb") as f:
@@ -491,7 +581,7 @@ def main():
             if model.num_cells < args.food:
                 model.spawn_cells(args.food - model.num_cells)
 
-            # Run SRA agents
+            # Run SRAs
             for i in range(len(sra_players)):
                 if not sra_players[i].alive:
                     continue
