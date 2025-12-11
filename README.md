@@ -32,22 +32,12 @@ Install requirements:
 
 ## Usage
 
-    usage: trainer.py
-    usage: agario_simulation.py
-    usage: agario_singleplayer.py
-
 ### Training RNN Agents
     python trainer.py
 
 ### Running Simulations
-    # Run simulation with RNN and MBRA agents
+    # Run simulation with RNN, SRA, and MBRA agents
     python agario_simulation.py
-    
-    # Run standalone MBRA simulation (for testing)
-    python test_mbra.py -t simulation
-    
-    # Run memory buffer tests
-    python test_mbra.py -t memory
 
 ### Single Player Game
     python agario_singleplayer.py
@@ -131,7 +121,10 @@ python test_mbra.py -t simulation -d 120 -f 60 --headless
 ## Screenshots
 
 Example of object recognition while web crawling on [agar.io](https://en.wikipedia.org/wiki/Agar.io)
-![processed_image.png](processed_image.png)
+![processed_image.png](screenshots/processed_image.png)
+
+Spectating a training simulation. Bright green cells are RNN agents and red cells are SRAs. Large dark green cells are viruses. Small multicolored pellets are food
+![training_example.jpg](screenshots/training_example.jpg)
 
 ## Acknowledgements
 

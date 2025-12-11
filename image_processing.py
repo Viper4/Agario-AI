@@ -258,7 +258,7 @@ class ImageProcessing:
         cv2.resizeWindow("Processed Image", 1200, 800)
         cv2.imshow("Processed Image", self.img_visualization)
         if save_to_file:
-            cv2.imwrite("processed_image.png", self.img_visualization)
+            cv2.imwrite("screenshots/processed_image.png", self.img_visualization)
         cv2.waitKey(1)
 
     def extract_text(self, png_bytes: bytes):
