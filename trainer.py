@@ -267,9 +267,6 @@ class GeneticTrainer:
 
             # Tournament selection
             for i in range(diff):
-                # Default parents are random parents from top half
-                parent1, parent2 = self.random_parents()
-
                 # Tournament selection
                 if isinstance(self.population[i], RNNAgent):
                     if len(rnn_reproduce_pool) > 0:
@@ -277,41 +274,65 @@ class GeneticTrainer:
                         parent1 = self.tournament_selection(rnn_reproduce_pool)
                         parent2 = self.tournament_selection(rnn_reproduce_pool)
                         num_rnns += 1
-                    elif len(rnn_indices) > 0:
-                        # Protect against early extinction and force reproduce
+                    elif (self.extinction_counters["RNN"] < self.extinction_threshold and
+                          len(rnn_indices) > 0 and num_rnns < max(1, len(rnn_indices) - 1)):
+                        # Shrink offspring by 1 but maintain at least 1 child to prevent extinction
                         self.extinction_counters["RNN"] += 1
-                        # Shrink offspring by 1 but maintain at least 1 child
-                        if num_rnns < max(1, len(rnn_indices) - 1) and self.extinction_counters["RNN"] < self.extinction_threshold:
-                            parent1 = self.tournament_selection(rnn_indices)
-                            parent2 = self.tournament_selection(rnn_indices)
+                        parent1 = self.tournament_selection(rnn_indices)
+                        parent2 = self.tournament_selection(rnn_indices)
+                        num_rnns += 1
+                    else:
+                        # Random parents from top half
+                        parent1, parent2 = self.random_parents()
+                        if isinstance(parent1, RNNAgent):
                             num_rnns += 1
+                        elif isinstance(parent1, LSTMAgent):
+                            num_lstms += 1
+                        elif isinstance(parent1, GRUAgent):
+                            num_grus += 1
                 elif isinstance(self.population[i], LSTMAgent):
                     if len(lstm_reproduce_pool) > 0:
                         self.extinction_counters["LSTM"] = 0
                         parent1 = self.tournament_selection(lstm_reproduce_pool)
                         parent2 = self.tournament_selection(lstm_reproduce_pool)
                         num_lstms += 1
-                    elif len(lstm_indices) > 0:
-                        # Protect against early extinction and force reproduce
+                    elif (self.extinction_counters["LSTM"] < self.extinction_threshold and
+                          len(lstm_indices) > 0 and num_lstms < max(1, len(lstm_indices) - 1)):
+                        # Shrink offspring by 1 but maintain at least 1 child to prevent extinction
                         self.extinction_counters["LSTM"] += 1
-                        # Shrink offspring by 1 but maintain at least 1 child
-                        if num_lstms < max(1, len(lstm_indices) - 1) and self.extinction_counters["LSTM"] < self.extinction_threshold:
-                            parent1 = self.tournament_selection(lstm_indices)
-                            parent2 = self.tournament_selection(lstm_indices)
+                        parent1 = self.tournament_selection(lstm_indices)
+                        parent2 = self.tournament_selection(lstm_indices)
+                        num_rnns += 1
+                    else:
+                        # Random parents from top half
+                        parent1, parent2 = self.random_parents()
+                        if isinstance(parent1, RNNAgent):
+                            num_rnns += 1
+                        elif isinstance(parent1, LSTMAgent):
                             num_lstms += 1
+                        elif isinstance(parent1, GRUAgent):
+                            num_grus += 1
                 elif isinstance(self.population[i], GRUAgent):
                     if len(gru_reproduce_pool) > 0:
                         self.extinction_counters["GRU"] = 0
                         parent1 = self.tournament_selection(gru_reproduce_pool)
                         parent2 = self.tournament_selection(gru_reproduce_pool)
                         num_grus += 1
-                    elif len(gru_indices) > 0:
-                        # Protect against early extinction and force reproduce
+                    elif (self.extinction_counters["GRU"] < self.extinction_threshold and
+                          len(gru_indices) > 0 and num_grus < max(1, len(gru_indices) - 1)):
+                        # Shrink offspring by 1 but maintain at least 1 child to prevent extinction
                         self.extinction_counters["GRU"] += 1
-                        # Shrink offspring by 1 but maintain at least 1 child
-                        if num_grus < max(1, len(gru_indices) - 1) and self.extinction_counters["GRU"] < self.extinction_threshold:
-                            parent1 = self.tournament_selection(gru_indices)
-                            parent2 = self.tournament_selection(gru_indices)
+                        parent1 = self.tournament_selection(gru_indices)
+                        parent2 = self.tournament_selection(gru_indices)
+                        num_grus += 1
+                    else:
+                        # Random parents from top half
+                        parent1, parent2 = self.random_parents()
+                        if isinstance(parent1, RNNAgent):
+                            num_rnns += 1
+                        elif isinstance(parent1, LSTMAgent):
+                            num_lstms += 1
+                        elif isinstance(parent1, GRUAgent):
                             num_grus += 1
                 else:
                     raise ValueError(f"Unknown agent type: {type(self.population[i])}")

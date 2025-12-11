@@ -12,7 +12,8 @@ from web_scraper import WebScraper
 
 
 class Hyperparameters:
-    def __init__(self, hidden_layers: list[int], output_size: int, run_interval: float, param_mutations: dict, move_sensitivity: float, grid_width: int, grid_height: int, nodes_per_cell: int):
+    def __init__(self, hidden_layers: list[int], output_size: int, run_interval: float, param_mutations: dict,
+                 move_sensitivity: float, grid_width: int, grid_height: int, nodes_per_cell: int):
         self.hidden_layers = hidden_layers
         self.output_size = output_size
         self.run_interval = run_interval
@@ -138,13 +139,15 @@ class BaseAgent(threading.Thread):
 
 
 class TorchAgent(BaseAgent):
-    def __init__(self, network_class: type[DeepRNN | DeepLSTM | DeepGRU], hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+    def __init__(self, network_class: type[DeepRNN | DeepLSTM | DeepGRU], hyperparameters: Hyperparameters | None,
+                 fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
         super().__init__(hyperparameters.run_interval, fitness_weights)
         self.hyperparameters = hyperparameters
         self.device = device
 
         self.network_class = network_class
-        self.net = network_class(hyperparameters.input_size, hyperparameters.hidden_layers, hyperparameters.output_size, self.device)
+        self.net = network_class(hyperparameters.input_size, hyperparameters.hidden_layers, hyperparameters.output_size,
+                                 self.device)
         self.hidden = None  # Hidden states for each layer (memory)
 
         # Randomize the parameters if specified
@@ -234,9 +237,10 @@ class TorchAgent(BaseAgent):
         Generates an empty grid of shape (grid_width, grid_height, nodes_per_cell)
         :return: the torch grid
         """
-        return torch.zeros((self.hyperparameters.grid_width, self.hyperparameters.grid_height, self.hyperparameters.nodes_per_cell),
-                           device=self.device,
-                           dtype=torch.float32)
+        return torch.zeros(
+            (self.hyperparameters.grid_width, self.hyperparameters.grid_height, self.hyperparameters.nodes_per_cell),
+            device=self.device,
+            dtype=torch.float32)
 
     def get_grid_index(self, pos: tuple[float, float]):
         """
@@ -314,17 +318,20 @@ class TorchAgent(BaseAgent):
 
 
 class RNNAgent(TorchAgent):
-    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None,
+                 randomize_params: bool, device: torch.device):
         super().__init__(DeepRNN, hyperparameters, fitness_weights, randomize_params, device)
 
 
 class LSTMAgent(TorchAgent):
-    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None,
+                 randomize_params: bool, device: torch.device):
         super().__init__(DeepLSTM, hyperparameters, fitness_weights, randomize_params, device)
 
 
 class GRUAgent(TorchAgent):
-    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None, randomize_params: bool, device: torch.device):
+    def __init__(self, hyperparameters: Hyperparameters | None, fitness_weights: FitnessWeights | None,
+                 randomize_params: bool, device: torch.device):
         super().__init__(DeepGRU, hyperparameters, fitness_weights, randomize_params, device)
 
 
@@ -332,7 +339,8 @@ class MemoryItem:
     """
     Represents a single object in the memory buffer with priority and timestamp.
     """
-    def __init__(self, obj_type: str, pos: tuple[float, float], priority: float, 
+
+    def __init__(self, obj_type: str, pos: tuple[float, float], priority: float,
                  timestamp: int, area: float = 0.0, radius: float = 0.0):
         self.obj_type = obj_type  # Food, player, virus
         self.pos = pos
@@ -350,11 +358,11 @@ class MemoryItem:
         """
         ticks_elapsed = current_tick - self.timestamp
         if ticks_elapsed > 0:
-             # Limit max decay ticks to avoid floating point precision issues
+            # Limit max decay ticks to avoid floating point precision issues
             ticks_elapsed = min(ticks_elapsed, 500)
             self.priority = self.initial_priority * (decay_factor ** ticks_elapsed)
 
-    def update(self, pos: tuple[float, float], priority: float, timestamp: int, 
+    def update(self, pos: tuple[float, float], priority: float, timestamp: int,
                area: float = 0.0, radius: float = 0.0):
         """
         Update memory item with new observation (resets priority).
@@ -386,18 +394,19 @@ class MemoryBuffer:
     """
     Manages memory items for different object types with priority decay.
     """
-    def __init__(self, decay_factor: float = 0.92, priority_threshold: float = 0.1, 
+
+    def __init__(self, decay_factor: float = 0.92, priority_threshold: float = 0.1,
                  max_size_per_type: int = 50, distance_weight_factor: float = 500.0):
         self.decay_factor = decay_factor
         self.priority_threshold = priority_threshold
         self.max_size_per_type = max_size_per_type
         self.distance_weight_factor = distance_weight_factor
-        
+
         self.threats: list[MemoryItem] = []
         self.prey: list[MemoryItem] = []
         self.foods: list[MemoryItem] = []
         self.viruses: list[MemoryItem] = []
-        
+
         self.initial_priorities = {
             "threat": 1.0,
             "prey": 0.8,
@@ -418,8 +427,8 @@ class MemoryBuffer:
         else:
             raise ValueError(f"Unknown object type: {obj_type}")
 
-    def _find_nearby_item(self, obj_type: str, pos: tuple[float, float], 
-                         threshold_distance: float = 50.0) -> MemoryItem | None:
+    def _find_nearby_item(self, obj_type: str, pos: tuple[float, float],
+                          threshold_distance: float = 50.0) -> MemoryItem | None:
         """
         Find a memory item near the given position (within threshold).
         :param obj_type: Type of object
@@ -429,7 +438,7 @@ class MemoryBuffer:
         """
         buffer = self._get_buffer(obj_type)
         threshold_sqr = threshold_distance * threshold_distance
-        
+
         for item in buffer:
             if item.distance_to(pos) < threshold_sqr:
                 return item
@@ -448,7 +457,7 @@ class MemoryBuffer:
                 else:
                     self.add_item(obj_type, pos, current_tick, area=area)
 
-    def update_with_visible_objects(self, threats: list, prey: list, foods: list, 
+    def update_with_visible_objects(self, threats: list, prey: list, foods: list,
                                     viruses: list, current_tick: int):
         """
         Update memory buffer with currently visible objects.
@@ -464,7 +473,7 @@ class MemoryBuffer:
         self._update_object_type("food", foods, current_tick)
         self._update_object_type("virus", viruses, current_tick)
 
-    def add_item(self, obj_type: str, pos: tuple[float, float], timestamp: int, 
+    def add_item(self, obj_type: str, pos: tuple[float, float], timestamp: int,
                  area: float = 0.0, radius: float = 0.0):
         """
         Add a new memory item to the buffer.
@@ -476,10 +485,10 @@ class MemoryBuffer:
         """
         buffer = self._get_buffer(obj_type)
         priority = self.initial_priorities[obj_type]
-        
+
         if len(buffer) >= self.max_size_per_type:
             buffer.pop(0)
-        
+
         new_item = MemoryItem(obj_type, pos, priority, timestamp, area, radius)
         buffer.append(new_item)
 
@@ -494,7 +503,7 @@ class MemoryBuffer:
                 item.decay(self.decay_factor, current_tick)
             buffer[:] = [item for item in buffer if item.priority >= self.priority_threshold]
 
-    def _merge_memory_items(self, memory_items: list, current_objects: list, 
+    def _merge_memory_items(self, memory_items: list, current_objects: list,
                             my_pos: tuple[float, float], include_area: bool = False):
         """Helper method to merge memory items with current visible objects."""
         merged = list(current_objects)
@@ -506,31 +515,30 @@ class MemoryBuffer:
                 grid_x = int(pos[0] / grid_size)
                 grid_y = int(pos[1] / grid_size)
                 current_positions_set.add((grid_x, grid_y))
-        
+
         for item in memory_items:
-          grid_x = int(item.pos[0] / grid_size)
-          grid_y = int(item.pos[1] / grid_size)
-            
-          # Check this grid cell and neighbors for duplicates
-          is_duplicate = False
-          for dx in range(-1, 2):
+            grid_x = int(item.pos[0] / grid_size)
+            grid_y = int(item.pos[1] / grid_size)
+
+            # Check this grid cell and neighbors for duplicates
+            is_duplicate = False
+            for dx in range(-1, 2):
                 for dy in range(-1, 2):
                     if (grid_x + dx, grid_y + dy) in current_positions_set:
                         is_duplicate = True
                         break
                 if is_duplicate:
                     break
-            
-            if not is_duplicate:
-                distance = math.sqrt(item.distance_to(my_pos))
-                adjusted_priority = item.priority / (1.0 + distance / self.distance_weight_factor)
-                if adjusted_priority >= self.priority_threshold:
-                    merged.append((item.pos[0], item.pos[1], item.area) if include_area else item.pos)
+                if not is_duplicate:
+                    distance = math.sqrt(item.distance_to(my_pos))
+                    adjusted_priority = item.priority / (1.0 + distance / self.distance_weight_factor)
+                    if adjusted_priority >= self.priority_threshold:
+                        merged.append((item.pos[0], item.pos[1], item.area) if include_area else item.pos)
         return merged
 
-    def get_merged_objects(self, my_pos: tuple[float, float], 
-                          current_threats: list, current_prey: list, 
-                          current_foods: list, current_viruses: list):
+    def get_merged_objects(self, my_pos: tuple[float, float],
+                           current_threats: list, current_prey: list,
+                           current_foods: list, current_viruses: list):
         """
         Merge current visible objects with memory buffer objects.
         Returns merged lists with priority-weighted objects.
@@ -548,7 +556,7 @@ class MemoryBuffer:
         return merged_threats, merged_prey, merged_foods, merged_viruses
 
     @staticmethod
-    def _is_same_position(pos1: tuple[float, float], pos2: tuple[float, float], 
+    def _is_same_position(pos1: tuple[float, float], pos2: tuple[float, float],
                           threshold: float) -> bool:
         """Check if two positions are the same (within threshold)."""
         dx = pos1[0] - pos2[0]
@@ -573,7 +581,8 @@ class SimpleReflexAgent(BaseAgent):
         self.my_area = 0.0
         self.last_action = (0.0, 0.0, 0.0, 0.0)
 
-    def get_action(self, threats: list, prey: list, foods: list, viruses: list, my_pos: tuple[float, float], min_area: float, max_area: float, my_radius: float):
+    def get_action(self, threats: list, prey: list, foods: list, viruses: list, my_pos: tuple[float, float],
+                   min_area: float, max_area: float, my_radius: float):
         """
         Rule-based decision logic.
         :param threats: List of visible threats
@@ -621,8 +630,10 @@ class SimpleReflexAgent(BaseAgent):
             # Rule 3: Eat food
             elif foods:
                 closest_food = min(foods, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
-                target_pos[0] = closest_food[0]
-                target_pos[1] = closest_food[1]
+                dx = closest_food[0] - my_pos[0]
+                dy = closest_food[1] - my_pos[1]
+                target_pos[0] = my_pos[0] + dx * 2.0
+                target_pos[1] = my_pos[1] + dy * 2.0
 
         # Virus avoidance (when large enough)
         if viruses and self.my_area > self.VIRUS_DANGER_SIZE:
@@ -671,7 +682,7 @@ class ModelBasedReflexAgent(BaseAgent):
         self.explore_duration = 60
         self.last_positions = []  # Track recent positions to detect stuck
         self.world_bounds = None  # Will be set based on observed positions
-                     
+
     def get_action(self, threats: list, prey: list, foods: list, viruses: list, my_pos: tuple[float, float],
                    min_area: float, max_area: float, my_radius: float, current_tick: int = None):
         """
@@ -692,7 +703,10 @@ class ModelBasedReflexAgent(BaseAgent):
 
         self.memory_buffer.update_with_visible_objects(threats, prey, foods, viruses, self.current_tick)
         self.memory_buffer.decay_all(self.current_tick)
-        merged_threats, merged_prey, merged_foods, merged_viruses = self.memory_buffer.get_merged_objects(my_pos, threats, prey, foods, viruses)
+        merged_threats, merged_prey, merged_foods, merged_viruses = self.memory_buffer.get_merged_objects(my_pos,
+                                                                                                          threats, prey,
+                                                                                                          foods,
+                                                                                                          viruses)
 
         target_pos = [my_pos[0], my_pos[1]]
         split, eject = 0.0, 0.0
@@ -717,7 +731,8 @@ class ModelBasedReflexAgent(BaseAgent):
         # Priority 2: Hunt prey or collect food
         if not running:
             if merged_prey:
-                closest_prey = min(merged_prey, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+                closest_prey = min(merged_prey,
+                                   key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
                 prey_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_prey[0], closest_prey[1])
                 target_pos[0], target_pos[1] = closest_prey[0], closest_prey[1]
                 has_target = True
@@ -762,7 +777,7 @@ class ModelBasedReflexAgent(BaseAgent):
             # Check if position hasn't changed much
             if len(self.last_positions) >= self.STUCK_TICKS:
                 first_pos = self.last_positions[0]
-                total_movement = math.sqrt((my_pos[0] - first_pos[0])**2 + (my_pos[1] - first_pos[1])**2)
+                total_movement = math.sqrt((my_pos[0] - first_pos[0]) ** 2 + (my_pos[1] - first_pos[1]) ** 2)
                 if total_movement < self.STUCK_THRESHOLD:
                     # Force new random direction
                     angle = random.uniform(0, 2 * math.pi)
@@ -780,8 +795,8 @@ class ModelBasedReflexAgent(BaseAgent):
         """Clear memory items near current position (likely already consumed)."""
         radius_sqr = radius * radius
         for buffer in [self.memory_buffer.foods, self.memory_buffer.prey]:
-            buffer[:] = [item for item in buffer 
-                        if item.distance_to(my_pos) > radius_sqr]
+            buffer[:] = [item for item in buffer
+                         if item.distance_to(my_pos) > radius_sqr]
 
     def run_web_game(self, visualize: bool):
         """
@@ -833,6 +848,3 @@ class ModelBasedReflexAgent(BaseAgent):
             time.sleep(self.run_interval)
 
         return None
-
-
-
