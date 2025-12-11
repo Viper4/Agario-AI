@@ -94,7 +94,7 @@ The agent combines current observations with memory buffer items:
 
 ## Final Report
 You can access the LaTeX document containing a full run down and analysis of the project here:
-[final_report.pdf](final_report.pdf)
+[FinalReport.pdf](FinalReport.pdf)
 
 ## Screenshots
 
