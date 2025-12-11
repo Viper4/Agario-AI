@@ -92,31 +92,9 @@ The agent combines current observations with memory buffer items:
    - Sort by priority, prioritize high-priority objects
    - Apply distance weighting for memory buffer objects
 
-### Implementation Status
-
-- Memory buffer data structures (MemoryItem, MemoryBuffer)
-- Priority decay mechanism
-- Integration with ModelBasedReflexAgent.get_action()
-- run_mbra() method in agario_simulation.py for standalone MBRA testing
-- Test script (test_mbra.py) for memory buffer and simulation testing
-
-### Testing
-
-Use the test script to verify memory buffer functionality and run MBRA simulations:
-
-```bash
-# Run all tests
-python test_mbra.py
-
-# Run only memory buffer tests
-python test_mbra.py -t memory
-
-# Run only simulation test
-python test_mbra.py -t simulation
-
-# Run simulation with custom parameters
-python test_mbra.py -t simulation -d 120 -f 60 --headless
-```
+## Final Report
+You can access the LaTeX document containing a full run down and analysis of the project here:
+[final_report.pdf](final_report.pdf)
 
 ## Screenshots
 
