@@ -651,6 +651,8 @@ class ModelBasedReflexAgent(BaseAgent):
     SPLIT_DISTANCE_THRESHOLD = 350.0
     VIRUS_AVOID_DISTANCE = 100.0
     EXPLORE_DISTANCE = 200.0  # Distance to move when exploring
+    STUCK_THRESHOLD = 25.0  # Distance threshold to detect if stuck
+    STUCK_TICKS = 30  # Number of ticks to consider as stuck
 
     def __init__(self, run_interval: float, fitness_weights: FitnessWeights, move_sensitivity: float = 50.0,
                  decay_factor: float = 0.985, priority_threshold: float = 0.05,
@@ -667,7 +669,9 @@ class ModelBasedReflexAgent(BaseAgent):
         self.explore_direction = (1.0, 0.0)
         self.explore_timer = 0
         self.explore_duration = 60
-
+        self.last_positions = []  # Track recent positions to detect stuck
+        self.world_bounds = None  # Will be set based on observed positions
+                     
     def get_action(self, threats: list, prey: list, foods: list, viruses: list, my_pos: tuple[float, float],
                    min_area: float, max_area: float, my_radius: float, current_tick: int = None):
         """
@@ -751,8 +755,33 @@ class ModelBasedReflexAgent(BaseAgent):
             target_pos[0] = my_pos[0] + self.explore_direction[0] * self.EXPLORE_DISTANCE
             target_pos[1] = my_pos[1] + self.explore_direction[1] * self.EXPLORE_DISTANCE
 
+        # Detect if stuck and force new direction
+        self.last_positions.append(my_pos)
+        if len(self.last_positions) > self.STUCK_TICKS:
+            self.last_positions.pop(0)
+            # Check if position hasn't changed much
+            if len(self.last_positions) >= self.STUCK_TICKS:
+                first_pos = self.last_positions[0]
+                total_movement = math.sqrt((my_pos[0] - first_pos[0])**2 + (my_pos[1] - first_pos[1])**2)
+                if total_movement < self.STUCK_THRESHOLD:
+                    # Force new random direction
+                    angle = random.uniform(0, 2 * math.pi)
+                    self.explore_direction = (math.cos(angle), math.sin(angle))
+                    target_pos[0] = my_pos[0] + self.explore_direction[0] * self.EXPLORE_DISTANCE * 2
+                    target_pos[1] = my_pos[1] + self.explore_direction[1] * self.EXPLORE_DISTANCE * 2
+                    self.last_positions.clear()
+                    # Clear memory of nearby food (might be eaten already)
+                    self._clear_nearby_memory(my_pos)
+
         self.last_action = (target_pos, split, eject)
         return self.last_action
+
+    def _clear_nearby_memory(self, my_pos: tuple[float, float], radius: float = 100.0):
+        """Clear memory items near current position (likely already consumed)."""
+        radius_sqr = radius * radius
+        for buffer in [self.memory_buffer.foods, self.memory_buffer.prey]:
+            buffer[:] = [item for item in buffer 
+                        if item.distance_to(my_pos) > radius_sqr]
 
     def run_web_game(self, visualize: bool):
         """
@@ -804,5 +833,6 @@ class ModelBasedReflexAgent(BaseAgent):
             time.sleep(self.run_interval)
 
         return None
+
 
 
