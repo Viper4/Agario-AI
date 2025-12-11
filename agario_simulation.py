@@ -540,6 +540,7 @@ def main():
     parser.add_argument('-sr', '--sras', dest='sras', type=int, default=5, help='number of SRAs')
     parser.add_argument('-mbr', '--mbras', dest='mbras', type=int, default=5, help='number of MBRA agents')
     parser.add_argument('-n', '--num_simulations', dest='num_simulations', type=int, default=10, help='number of simulations to run')
+    parser.add_argument('-hd', '--headless', dest='headless', type=bool, default=False, help='run in headless mode')
     args = parser.parse_args()
 
     bounds = [args.bounds, args.bounds]
@@ -588,16 +589,20 @@ def main():
     # Run simulations in parallel, one worker per simulation
     jobs.append(pool.apply_async(
         run_sim_worker,
-        args=(60, 300, state_dicts, agent_classes, pickled_data, args.sras, args.mbras, True,)
+        args=(60, 300, state_dicts, agent_classes, pickled_data, args.sras, args.mbras, args.headless,)
     ))
 
     pool.close()  # no more tasks
     # Wait for all jobs to finish and collect fitness
     for job in tqdm(jobs, desc="Running Simulations", total=len(jobs), unit="sims"):
-        sim_fitnesses, sra_fitnesses, mbra_fitnesses = job.get()
+        rnn_fitnesses, sra_fitnesses, mbra_fitnesses = job.get()
+        print("Simulation Finished:")
+        print(" RNN fitnesses: ", rnn_fitnesses)
+        print(" SRA fitnesses: ", rnn_fitnesses)
+        print(" MBRA fitnesses: ", rnn_fitnesses)
 
     pool.join()
-    sim.run(rnn_agents, args.sras, args.mbras, 60, args.duration, args.headless)
+    #sim.run(rnn_agents, args.sras, args.mbras, 60, args.duration, args.headless)
 
 
 if __name__ == '__main__':
