@@ -1,4 +1,4 @@
-# Agar AI
+# Agario AI
 This is a Python implementation of a genetic algorithm to train recurrent neural networks, and a model-based reflex agent to play [agar.io](https://en.wikipedia.org/wiki/Agar.io).
 
 A clone of the game including all features is included in the repository which was used to train the RNNs. Web crawling is only used for demonstration of our agents against real human players.
