@@ -183,16 +183,25 @@ class GeneticTrainer:
             jobs = []
             try:
                 # Run simulations in parallel, one worker per simulation
-                for i in range(num_simulations):
-                    jobs.append(pool.apply_async(
-                        agario_simulation.run_simulation_worker,
-                        args=(60, 300, state_dicts, agent_classes, pickled_data, headless, generation,)
-                    ))
+                if generation <= 25:
+                    # No predators
+                    for i in range(num_simulations):
+                        jobs.append(pool.apply_async(
+                            agario_simulation.run_sim_worker,
+                            args=(60, 300, state_dicts, agent_classes, pickled_data, 0, 0, headless,)
+                        ))
+                else:
+                    # With predators (SRA since MBRA slows things down)
+                    for i in range(num_simulations):
+                        jobs.append(pool.apply_async(
+                            agario_simulation.run_sim_worker,
+                            args=(60, 300, state_dicts, agent_classes, pickled_data, self.population_size // 2, 0, headless,)
+                        ))
 
                 pool.close()  # no more tasks
                 # Wait for all jobs to finish and collect fitness
                 for job in tqdm(jobs, desc=f"Generation {generation}", total=num_simulations, unit="sims"):
-                    sim_fitnesses = job.get()
+                    sim_fitnesses, _, _ = job.get()  # Don't care about SRA or MBRA fitnesses
                     for i in range(self.population_size):
                         self.population[i].fitnesses.append(sim_fitnesses[i])
 
