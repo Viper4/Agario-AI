@@ -5,6 +5,7 @@ import random
 import agario_simulation
 import pickle
 import sys
+import argparse
 from agent import RNNAgent, LSTMAgent, GRUAgent, Hyperparameters, FitnessWeights
 from multiprocessing import Pool
 from tqdm import tqdm
@@ -378,25 +379,38 @@ class GeneticTrainer:
 
 
 if __name__ == "__main__":
-    grid_width = 12
-    grid_height = 8
-    nodes_per_cell = 3
-    num_inputs = grid_width * grid_height * nodes_per_cell
-    hyperparameters = Hyperparameters(hidden_layers=[72],
+    parser = argparse.ArgumentParser(description="Trainer for RNN agents")
+    parser.add_argument('-wt', '--width', dest='grid_width', type=int, default=12, help='RNN vision grid width')
+    parser.add_argument('-ht', '--height', dest='grid_height', type=int, default=8, help='RNN vision grid height')
+    parser.add_argument('-npc', '--nodes_per_cell', dest='nodes_per_cell', type=int, default=3, help='Number of nodes per vision grid cell')
+    parser.add_argument('-hl', '--hidden', dest='hidden', type=int, default=72, help='RNN hidden layer size')
+    parser.add_argument('-fw', '--food_weight', dest='food_weight', type=float, default=0.1, help='Weight of food in fitness function')
+    parser.add_argument('-tw', '--time_weight', dest='time_weight', type=float, default=100.0, help='Weight of time alive in fitness function')
+    parser.add_argument('-cw', '--cells_eaten_weight', dest='cells_eaten_weight', type=float, default=10.0, help='Weight of cells eaten in fitness function')
+    parser.add_argument('-sw', '--score_weight', dest='score_weight', type=float, default=0.9, help='Weight of score in fitness function')
+    parser.add_argument('-dw', '--death_weight', dest='death_weight', type=float, default=500.0, help='Weight of death in fitness function')
+    parser.add_argument('-ps', '--population_size', dest='population_size', type=int, default=50, help='Population size (number of agents per generation)')
+    parser.add_argument('-ns', '--num_simulations', dest='num_simulations', type=int, default=5, help='Number of simulations to run for each generation')
+    parser.add_argument('-hdl', '--headless', dest='headless', type=bool, default=True, help='Whether to visualize the simulation (True means dont visualize)')
+    args = parser.parse_args()
+
+    num_inputs = args.grid_width * args.grid_height * args.nodes_per_cell
+    hyperparameters = Hyperparameters(hidden_layers=[args.hidden],
                                       output_size=4,
                                       run_interval=0.1,
                                       param_mutations={"weight": {"strength": 1.0, "chance": 0.05},
                                                        "bias": {"strength": 0.25, "chance": 0.025}},
                                       move_sensitivity=50.0,
-                                      grid_width=grid_width,
-                                      grid_height=grid_height,
-                                      nodes_per_cell=nodes_per_cell)
-    fitness_weights = FitnessWeights(food=0.1, time_alive=100.0, cells_eaten=10.0, score=0.9, death=500.0)
+                                      grid_width=args.grid_width,
+                                      grid_height=args.grid_height,
+                                      nodes_per_cell=args.nodes_per_cell)
+    fitness_weights = FitnessWeights(food=args.food_weight, time_alive=args.time_weight,
+                                     cells_eaten=args.cells_eaten_weight, score=args.score_weight, death=args.death_weight)
 
     trainer = GeneticTrainer(init_rnn_prop=0.33333,
                              init_lstm_prop=0.33333,
                              init_gru_prop=0.33334,
-                             population_size=int(input("Enter population size> ")),
+                             population_size=args.population_size,
                              hyperparameters=hyperparameters,
                              fitness_weights=fitness_weights,
                              save_file="agent_snapshots.pkl",
@@ -405,4 +419,4 @@ if __name__ == "__main__":
     #best_agent = RNNAgent.load_best_agent("gru_agent_snapshots_288i_72h_4o.pkl", hyperparameters, fitness_weights)
     trainer.init_agents(load_from_file=True)
     #trainer.population[0] = best_agent
-    trainer.train(num_simulations=5, headless=True)
+    trainer.train(num_simulations=args.num_simulations, headless=args.headless)

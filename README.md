@@ -35,12 +35,22 @@ Install requirements:
 ### Training RNN Agents
     python trainer.py
 
+    # Run trainer.py with the --help flag to see available arguments
+
 ### Running Simulations
-    # Run simulation with RNN, SRA, and MBRA agents
     python agario_simulation.py
+
+    # Run agario_simulation.py with the --help flag to see available arguments
 
 ### Single Player Game
     python agario_singleplayer.py
+
+    # Run agario_singleplayer.py with the --help flag to see available arguments
+
+### Running Experiment
+    python run_experiment.py
+
+    # Run run_experiment.py with the --help flag to see available arguments
 
 ## Model-Based Reflex Agent with Memory Buffer
 

@@ -241,6 +241,6 @@ class OCView:
             cv2.imshow("Spectating", frame)
             self.poll_spectate_keys(playercells)
         else:
-            cv2.imshow("Playing", frame)
+            cv2.imshow("Game", frame)
             self.poll_human_keys()
 

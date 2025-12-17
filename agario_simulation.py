@@ -2,6 +2,7 @@ import time
 import torch
 import argparse
 import pickle
+import os
 from multiprocessing import Pool
 from tqdm import tqdm
 from game.opencv_view import OCView, OCCamera
@@ -332,6 +333,7 @@ class AgarioSimulation:
         :return: List of fitness values for each RNN agent
         """
         num_frames = int(simulation_duration * base_fps)
+        frame_delay = 1 / base_fps
 
         bounds = [self.bounds, self.bounds]
 
@@ -362,12 +364,22 @@ class AgarioSimulation:
             prev_target_pos.append(mbra_players[i].center())
             mbras.append(ModelBasedReflexAgent(agents[0].run_interval, agents[0].fitness_weights, 50.0))
 
-        model = Model(rnn_players + sra_players, bounds=bounds, chunk_size=self.bounds // 10)  # 21 chunks per side
+        human_player = None
+        if not spectating:
+            human_player = Player.make_random("Player", bounds)
+            model = Model(rnn_players + sra_players + mbra_players + [human_player], bounds=bounds,
+                          chunk_size=self.bounds // 10)  # 21 chunks per side
+        else:
+            model = Model(rnn_players + sra_players + mbra_players, bounds=bounds,
+                          chunk_size=self.bounds // 10)  # 21 chunks per side
+
         model.spawn_cells(self.food_count)
         model.spawn_viruses(self.virus_count)
         print(f"Simulation model initialized with {model.chunk_count_x}x{model.chunk_count_y}={model.chunk_count_x * model.chunk_count_y} chunks.")
 
         view = OCView(self.view_width, self.view_height, model, rnn_players[0], debug=False)
+        if not spectating:
+            view.player = human_player
 
         start_time = time.time()
         last_agent_run_frame = -100
@@ -450,7 +462,9 @@ class AgarioSimulation:
                 target_score = view.player.score()
                 inv_scale = OCCamera.get_inverse_scale(target_score)
                 view.camera.scale = 1.0 / inv_scale
-                view.redraw(spectate_mode=True)
+                view.redraw(spectate_mode=spectating)
+                if not spectating:
+                    time.sleep(frame_delay)  # Maintain consistent game speed for human player
 
         rnn_fitnesses = []
         rnn_agents_alive = 0
@@ -530,7 +544,7 @@ def run_sim_worker(fps: int, simulation_duration: float, state_dicts: list[dict]
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Offline AI Agar.io Game")
+    parser = argparse.ArgumentParser(description="Offline AI Agar.io Simulation")
     parser.add_argument('-wt', '--width', dest='width', type=int, default=900, help='screen width')
     parser.add_argument('-ht', '--height', dest='height', type=int, default=600, help='screen height')
     parser.add_argument('-b', '--bounds', dest='bounds', type=int, default=1500, help='half-size of world bounds (world is [-b,b] x [-b,b])')
@@ -541,9 +555,11 @@ def main():
     parser.add_argument('-mbr', '--mbras', dest='mbras', type=int, default=5, help='number of MBRA agents')
     parser.add_argument('-n', '--num_simulations', dest='num_simulations', type=int, default=10, help='number of simulations to run')
     parser.add_argument('-hd', '--headless', dest='headless', type=bool, default=False, help='run in headless mode')
+    parser.add_argument('-ply', '--playing', dest='playing', type=bool, default=False, help='whether the user (you) will play in the simulation (will set num_simulations to 1 automatically)')
     args = parser.parse_args()
 
-    bounds = [args.bounds, args.bounds]
+    if args.playing:
+        args.num_simulations = 1
 
     # Load best agent from snapshots file
     fitness_weights = FitnessWeights(food=0.1, time_alive=100.0, cells_eaten=50.0, score=0.9, death=500.0)
@@ -581,28 +597,34 @@ def main():
         state_dicts.append(base_rnn.net.state_dict())
         agent_classes.append("GRU")
 
-    print("In spectate mode, use the left and right arrow keys to cycle through the player cells")
+    if args.playing:
+        player = Player.make_random("Player", [args.bounds, args.bounds])
+        sim = AgarioSimulation(view_width=args.width, view_height=args.height,
+                               bounds=args.bounds,
+                               food_count=args.food,
+                               virus_count=args.viruses)
+        sim.run(rnn_agents, args.sras, args.mbras, 60, 300, args.headless, spectating=False)
+    else:
+        print("In spectate mode, use the left and right arrow keys to cycle through the player cells")
 
-    sim = AgarioSimulation(args.width, args.height, args.bounds, args.food, args.viruses)
-    pool = Pool(processes=6)
-    jobs = []
-    # Run simulations in parallel, one worker per simulation
-    jobs.append(pool.apply_async(
-        run_sim_worker,
-        args=(60, 300, state_dicts, agent_classes, pickled_data, args.sras, args.mbras, args.headless,)
-    ))
+        pool = Pool(processes=min(6, os.cpu_count()))
+        jobs = []
+        # Run simulations in parallel, one worker per simulation
+        jobs.append(pool.apply_async(
+            run_sim_worker,
+            args=(60, 300, state_dicts, agent_classes, pickled_data, args.sras, args.mbras, args.headless,)
+        ))
 
-    pool.close()  # no more tasks
-    # Wait for all jobs to finish and collect fitness
-    for job in tqdm(jobs, desc="Running Simulations", total=len(jobs), unit="sims"):
-        rnn_fitnesses, sra_fitnesses, mbra_fitnesses = job.get()
-        print("Simulation Finished:")
-        print(" RNN fitnesses: ", rnn_fitnesses)
-        print(" SRA fitnesses: ", rnn_fitnesses)
-        print(" MBRA fitnesses: ", rnn_fitnesses)
+        pool.close()  # no more tasks
+        # Wait for all jobs to finish and collect fitness
+        for job in tqdm(jobs, desc="Running Simulations", total=len(jobs), unit="sims"):
+            rnn_fitnesses, sra_fitnesses, mbra_fitnesses = job.get()
+            print("Simulation Finished:")
+            print(" RNN fitnesses: ", rnn_fitnesses)
+            print(" SRA fitnesses: ", rnn_fitnesses)
+            print(" MBRA fitnesses: ", rnn_fitnesses)
 
-    pool.join()
-    #sim.run(rnn_agents, args.sras, args.mbras, 60, args.duration, args.headless)
+        pool.join()
 
 
 if __name__ == '__main__':

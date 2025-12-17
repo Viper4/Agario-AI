@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Experiment script for comparing RNN agents vs MBRA agents.
 Runs multiple simulations and collects fitness statistics for the paper.
@@ -11,8 +10,6 @@ Based on paper requirements:
 """
 
 import time
-import torch
-import pickle
 import numpy as np
 from tqdm import tqdm
 from game.opencv_view import OCView, OCCamera
@@ -55,14 +52,14 @@ def run_rnn_vs_mbra_experiment(
     
     # Setup hyperparameters and fitness weights
     hyperparameters = Hyperparameters(
-        hidden_layers=[64, 16],
+        hidden_layers=[72],
         output_size=4,
         run_interval=0.1,
         param_mutations={"weight": 2.0, "bias": 0.5},
         move_sensitivity=50.0,
-        grid_width=9,
-        grid_height=6,
-        nodes_per_cell=4
+        grid_width=12,
+        grid_height=8,
+        nodes_per_cell=3
     )
     fitness_weights = FitnessWeights(
         food=0.5,
@@ -73,23 +70,8 @@ def run_rnn_vs_mbra_experiment(
     )
     
     # Try to load trained RNN from file
-    base_rnn = RNNAgent(
-        hyperparameters=hyperparameters.copy(),
-        fitness_weights=fitness_weights,
-        randomize_params=False,
-        device=torch.device("cpu")
-    )
-    
-    try:
-        with open("agent_snapshots.pkl", "rb") as f:
-            agent_snapshots = pickle.load(f)
-            base_rnn.rnn.load_state_dict(agent_snapshots[0])
-            print("[OK] Loaded trained RNN from agent_snapshots.pkl")
-    except FileNotFoundError:
-        print("[WARNING] agent_snapshots.pkl not found, using random RNN weights")
-    except Exception as e:
-        print(f"[WARNING] Could not load RNN weights: {e}")
-    
+    best_agent = RNNAgent.load_best_agent("gru_agent_snapshots_288i_72h_4o.pkl", hyperparameters, fitness_weights)
+
     # Storage for results
     all_rnn_fitnesses = []
     all_mbra_fitnesses = []
@@ -108,7 +90,7 @@ def run_rnn_vs_mbra_experiment(
         rnn_agents = []
         rnn_players = []
         for i in range(num_rnn):
-            agent = base_rnn.copy()
+            agent = best_agent.copy()
             player = Player.make_random(f"RNN_{i}", world_bounds, color=(0, 255, 0))  # Green
             rnn_agents.append(agent)
             rnn_players.append(player)

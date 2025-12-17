@@ -15,7 +15,7 @@ def main():
     parser.add_argument('-f', '--food', dest='food', type=int, default=800, help='initial food cell count')
     parser.add_argument('-v', '--viruses', dest='viruses', type=int, default=20, help='initial virus count')
     parser.add_argument('-n', '--nick', dest='nick', type=str, default='Player', help='your nickname')
-    parser.add_argument('-h', '--husks', dest='husks', type=int, default=5, help='How many husks (empty players) to spawn')
+    parser.add_argument('-hu', '--husks', dest='husks', type=int, default=5, help='How many husks (empty players) to spawn')
     parser.add_argument('-oc', '--opencv', dest='opencv', type=bool, default=True, help='Whether to use OpenCV view')
     args = parser.parse_args()
 
