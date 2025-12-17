@@ -7,7 +7,6 @@ A clone of the game including all features is included in the repository which w
 - Python3
 - [PyGame](https://www.pygame.org/)
 - [pygame-menu](https://github.com/ppizarror/pygame-menu)
-- [socket](https://docs.python.org/3/library/socket.html)
 - [loguru](https://github.com/Delgan/loguru)
 - [torch](https://pytorch.org/)
 - [numpy](https://numpy.org/)
@@ -15,6 +14,7 @@ A clone of the game including all features is included in the repository which w
 - [selenium](https://www.selenium.dev/)
 - [opencv-python](https://github.com/opencv/opencv-python)
 - [pytesseract](https://github.com/madmaze/pytesseract)
+- [pyautogui](https://pyautogui.readthedocs.io/en/latest/)
 
 
 ## Setup
