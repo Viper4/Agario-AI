@@ -36,8 +36,15 @@ Install requirements:
     usage: agario_simulation.py
     usage: agario_singleplayer.py
 
+    Run 10 headless simulations with 5 MBRA and 5 RNN agents:
+`python run_headless.py --mbras 5 --rnns 5 --num-runs 10 --output results.csv --headless`
+Or use the PowerShell helper:
+`.\run_experiments.ps1 -mbras 5 -rnns 5 -numRuns 10 -output results.csv`
+
+
 
 ## Screenshots
+
 
 Example of object recognition while web crawling on [agar.io](https://en.wikipedia.org/wiki/Agar.io)
 ![processed_image.png](processed_image.png)

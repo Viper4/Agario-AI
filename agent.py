@@ -344,6 +344,18 @@ class ModelBasedReflexAgent(BaseAgent):
         self.move_sensitivity = move_sensitivity
         self.my_area = 0.0
         self.last_action = (0.0, 0.0, 0.0, 0.0)
+        # Memory buffer for observed objects. Each entry is a dict:
+        # {"label": str, "pos": (x,y), "area": float, "last_seen": timestamp}
+        self.memory = []
+        self.memory_size = 200  # max elements to keep in memory
+        # Label decay rates (lambda) as specified
+        self._label_lambda = {
+            "food": 0.9,
+            "virus": 0.5,
+            "player": 0.25,
+            "other": 1.0
+        }
+        self._match_distance = 100.0  # distance to consider the same object across ticks
 
     def get_action(self, threats: list, prey: list, foods: list, viruses: list, my_pos: tuple[float, float], min_area: float, max_area: float, my_radius: float):
         """
@@ -364,11 +376,35 @@ class ModelBasedReflexAgent(BaseAgent):
 
         # Rule 1: Flee from threats (highest priority)
         running = False
-        if threats:
-            closest_threat = min(threats, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+        # Update memory with currently visible objects
+        now = time.time()
+        def add_visible(label, obj_list):
+            for obj in obj_list:
+                # obj can be (x,y) or (x,y,area)
+                x, y = obj[0], obj[1]
+                area = obj[2] if len(obj) > 2 else 1.0
+                self._update_memory_entry(label, (x, y), area, now)
+
+        add_visible("player", [(t[0], t[1], max_area) for t in threats])
+        add_visible("player", [(p[0], p[1], p[2]) for p in prey])
+        add_visible("food", [(f[0], f[1]) for f in foods])
+        add_visible("virus", [(v[0], v[1]) for v in viruses])
+
+        # Build effective threat list by combining visible threats and recent memory of large players
+        effective_threats = []
+        for m in self.memory:
+            if m["label"] == "player" and m["area"] > max_area * self.THREAT_SIZE_RATIO:
+                # consider recent memories only
+                if now - m["last_seen"] < 5.0:
+                    effective_threats.append((m["pos"][0], m["pos"][1]))
+        # add visible threats too
+        for t in threats:
+            effective_threats.append((t[0], t[1]))
+
+        if effective_threats:
+            closest_threat = min(effective_threats, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
             threat_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_threat[0], closest_threat[1])
             if threat_dist < self.SPLIT_DISTANCE_THRESHOLD * self.SPLIT_DISTANCE_THRESHOLD:
-                # Calculate direction away from threat
                 dx = my_pos[0] - closest_threat[0]
                 dy = my_pos[1] - closest_threat[1]
                 urgency = self.SPLIT_DISTANCE_THRESHOLD * self.SPLIT_DISTANCE_THRESHOLD - threat_dist
@@ -376,10 +412,20 @@ class ModelBasedReflexAgent(BaseAgent):
                 target_pos[1] = my_pos[1] + dy * urgency
                 running = True
 
-        # Rule 2: Chase prey
+        # Rule 2: Chase prey (visible first, then memory)
         if not running:
+            chosen_prey = None
             if prey:
-                closest_prey = min(prey, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+                chosen_prey = min(prey, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+            else:
+                # check memory for recent prey
+                recent_preys = [m for m in self.memory if m["label"] == "player" and m["area"] < max_area * self.PREY_SIZE_RATIO and (now - m["last_seen"] < 5.0)]
+                if recent_preys:
+                    m = min(recent_preys, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o["pos"][0], o["pos"][1]))
+                    chosen_prey = (m["pos"][0], m["pos"][1], m["area"])
+
+            if chosen_prey:
+                closest_prey = chosen_prey
                 prey_dist = geometry_utils.sqr_distance(my_pos[0], my_pos[1], closest_prey[0], closest_prey[1])
                 target_pos[0] = closest_prey[0]
                 target_pos[1] = closest_prey[1]
@@ -390,11 +436,21 @@ class ModelBasedReflexAgent(BaseAgent):
                     half_my_area = min_area * 0.5
                     if half_my_area * self.PREY_SIZE_RATIO > closest_prey[2]:
                         split = 1.0
-            # Rule 3: Eat food
-            elif foods:
-                closest_food = min(foods, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
-                target_pos[0] = closest_food[0]
-                target_pos[1] = closest_food[1]
+            # Rule 3: Eat food (visible then memory)
+            else:
+                chosen_food = None
+                if foods:
+                    chosen_food = min(foods, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o[0], o[1]))
+                else:
+                    recent_foods = [m for m in self.memory if m["label"] == "food" and (now - m["last_seen"] < 10.0)]
+                    if recent_foods:
+                        m = min(recent_foods, key=lambda o: geometry_utils.sqr_distance(my_pos[0], my_pos[1], o["pos"][0], o["pos"][1]))
+                        chosen_food = (m["pos"][0], m["pos"][1])
+
+                if chosen_food:
+                    closest_food = chosen_food
+                    target_pos[0] = closest_food[0]
+                    target_pos[1] = closest_food[1]
 
         # Virus avoidance (when large enough)
         if viruses and self.my_area > self.VIRUS_DANGER_SIZE:
@@ -410,6 +466,60 @@ class ModelBasedReflexAgent(BaseAgent):
 
         self.last_action = (target_pos, split, eject)
         return self.last_action
+
+    def _update_memory_entry(self, label: str, pos: tuple[float, float], area: float, timestamp: float):
+        """
+        Insert or update a memory entry for an observed object.
+        Matches to existing entries by proximity.
+        """
+        # Try to match by proximity
+        best_idx = None
+        best_dist = None
+        for i, m in enumerate(self.memory):
+            if m["label"] != label:
+                continue
+            d = math.hypot(m["pos"][0] - pos[0], m["pos"][1] - pos[1])
+            if best_dist is None or d < best_dist:
+                best_dist = d
+                best_idx = i
+
+        if best_idx is not None and best_dist is not None and best_dist < self._match_distance:
+            # update existing
+            self.memory[best_idx]["pos"] = pos
+            self.memory[best_idx]["area"] = area
+            self.memory[best_idx]["last_seen"] = timestamp
+        else:
+            # add new entry
+            self.memory.append({"label": label, "pos": pos, "area": area, "last_seen": timestamp})
+
+        # Trim memory if necessary
+        self._trim_memory(timestamp)
+
+    def _compute_priority(self, entry: dict, now: float) -> float:
+        """Compute decayed priority for a memory entry."""
+        area = max(1.0, entry.get("area", 1.0))
+        label = entry.get("label", "other")
+        lamb = self._label_lambda.get(label, 1.0)
+        dt = now - entry.get("last_seen", now)
+        # priority = ln(area) * (1 - lambda) ** dt
+        try:
+            base = math.log(area)
+        except Exception:
+            base = 0.0
+        decay = pow(max(0.0, 1.0 - lamb), dt)
+        return base * decay
+
+    def _trim_memory(self, now: float):
+        """Trim memory to at most memory_size entries by dropping lowest priority."""
+        if len(self.memory) <= self.memory_size:
+            return
+        # Compute priorities
+        priorities = [(self._compute_priority(m, now), i) for i, m in enumerate(self.memory)]
+        # Sort by priority ascending and drop the lowest until size constraint satisfied
+        priorities.sort(key=lambda x: x[0])
+        num_to_drop = len(self.memory) - self.memory_size
+        drop_indices = set(i for _, i in priorities[:num_to_drop])
+        self.memory = [m for idx, m in enumerate(self.memory) if idx not in drop_indices]
 
     def run_web_game(self, visualize: bool):
         """
