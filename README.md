@@ -3,8 +3,6 @@ This is a Python implementation of a genetic algorithm to train recurrent neural
 
 A clone of the game including all features is included in the repository which was used to train the RNNs and run simulations with.
 
-The full codebase can be found here: https://github.com/Viper4/Agario-AI
-
 ## Stack
 - Python3
 - [PyGame](https://www.pygame.org/)
